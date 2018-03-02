@@ -18,7 +18,7 @@ import (
 	"io"
 	"io/ioutil"
 
-	"github.com/flynn/noise"
+	"github.com/gedigi/noise"
 	"gopkg.in/noisesocket.v0"
 )
 

@@ -8,7 +8,7 @@ import (
 
 	"fmt"
 
-	"github.com/flynn/noise"
+	"github.com/gedigi/noise"
 	"github.com/pkg/errors"
 )
 

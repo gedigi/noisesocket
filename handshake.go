@@ -10,7 +10,7 @@ import (
 
 	"fmt"
 
-	"github.com/flynn/noise"
+	"github.com/gedigi/noise"
 	"github.com/pkg/errors"
 )
 
@@ -67,7 +67,7 @@ func ComposeInitiatorHandshakeMessage(s noise.DHKey, rs []byte, payload []byte, 
 		Random:        random,
 	})
 
-	if err != nil{
+	if err != nil {
 		return
 	}
 

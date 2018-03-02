@@ -11,7 +11,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 
-	"github.com/flynn/noise"
+	"github.com/gedigi/noise"
 	noisesocket "gopkg.in/noisesocket.v0"
 	v "gopkg.in/noisesocket.v0/virgil"
 	"gopkg.in/virgil.v4/virgilapi"

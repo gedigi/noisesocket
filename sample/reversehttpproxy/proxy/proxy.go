@@ -14,7 +14,7 @@ import (
 
 	"encoding/base64"
 
-	"github.com/flynn/noise"
+	"github.com/gedigi/noise"
 	"github.com/namsral/flag"
 	"github.com/oxtoacart/bpool"
 	"gopkg.in/noisesocket.v0"

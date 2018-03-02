@@ -11,8 +11,8 @@ import (
 	"crypto/tls"
 	"fmt"
 
-	"github.com/flynn/noise"
-	"gopkg.in/noisesocket.v0"
+	"github.com/gedigi/noise"
+	"github.com/gedigi/noisesocket"
 )
 
 func main() {
@@ -22,7 +22,7 @@ func main() {
 
 	go startTlsServer(os.Args[2])
 
-	keys := noise.DH25519.GenerateKeypair(rand.Reader)
+	keys, _ := noise.DH25519.GenerateKeypair(rand.Reader)
 
 	l, err := noisesocket.Listen(os.Args[1], &noisesocket.ConnectionConfig{StaticKey: keys})
 	if err != nil {

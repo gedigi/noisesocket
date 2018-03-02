@@ -10,7 +10,7 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/flynn/noise"
+	"github.com/gedigi/noise"
 
 	"github.com/pkg/errors"
 	"gopkg.in/noisesocket.v0"

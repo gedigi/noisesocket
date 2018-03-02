@@ -1,6 +1,6 @@
 package noisesocket
 
-import "github.com/flynn/noise"
+import "github.com/gedigi/noise"
 
 //supported primitives
 

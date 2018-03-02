@@ -17,7 +17,7 @@ import (
 
 	"crypto/tls"
 
-	"github.com/flynn/noise"
+	"github.com/gedigi/noise"
 	"github.com/julienschmidt/httprouter"
 	"golang.org/x/crypto/acme/autocert"
 	"gopkg.in/noisesocket.v0"

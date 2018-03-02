@@ -17,7 +17,7 @@ import (
 
 	"bytes"
 
-	"github.com/flynn/noise"
+	"github.com/gedigi/noise"
 	"github.com/pkg/errors"
 )
 
@@ -504,12 +504,10 @@ func (c *Conn) RunClientHandshake() error {
 	if csIn == nil && csOut == nil {
 		b := c.out.newBlock()
 
-		if b.data, csIn, csOut, err = state.WriteMessage(b.data, c.config.Payload); err != nil{
+		if b.data, csIn, csOut, err = state.WriteMessage(b.data, c.config.Payload); err != nil {
 			c.out.freeBlock(b)
 			return err
 		}
-
-
 
 		if _, err = c.writePacket(nil); err != nil {
 			c.out.freeBlock(b)
@@ -564,7 +562,7 @@ func (c *Conn) RunServerHandshake() error {
 
 	b := c.out.newBlock()
 
-	if b.data, csOut, csIn, err = hs.WriteMessage(b.data, c.config.Payload); err != nil{
+	if b.data, csOut, csIn, err = hs.WriteMessage(b.data, c.config.Payload); err != nil {
 		c.out.freeBlock(b)
 		return err
 	}
