@@ -32,6 +32,9 @@ type ConnectionConfig struct {
 	StaticKey      noise.DHKey
 	PeerStatic     []byte
 	Padding        uint16
+	DHFunc         noise.DHFunc
+	CipherFunc     noise.CipherFunc
+	HashFunc       noise.HashFunc
 }
 
 type ConnectionInfo struct {
@@ -461,7 +464,7 @@ func (c *Conn) RunClientHandshake() error {
 		csIn, csOut  *noise.CipherState
 	)
 
-	if negData, msg, state, err = ComposeInitiatorHandshakeMessage(c.config.StaticKey, nil, nil, nil); err != nil {
+	if negData, msg, state, err = ComposeInitiatorHandshakeMessage(c.config, nil, nil, nil); err != nil {
 		return err
 	}
 	if _, err = c.writePacket(negData); err != nil {
@@ -540,7 +543,7 @@ func (c *Conn) RunServerHandshake() error {
 		return err
 	}
 
-	hs, err := ParseNegotiationData(c.hand.Next(c.hand.Len()), c.config.StaticKey)
+	hs, err := ParseNegotiationData(c.hand.Next(c.hand.Len()), c.config)
 
 	if err != nil {
 		return err

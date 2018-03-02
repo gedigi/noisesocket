@@ -27,7 +27,7 @@ func init() {
 }
 
 // ComposeInitiatorHandshakeMessage generates handshakeState and the first noise message.
-func ComposeInitiatorHandshakeMessage(s noise.DHKey, rs []byte, payload []byte, ePrivate []byte) (negData, msg []byte, state *noise.HandshakeState, err error) {
+func ComposeInitiatorHandshakeMessage(s ConnectionConfig, rs []byte, payload []byte, ePrivate []byte) (negData, msg []byte, state *noise.HandshakeState, err error) {
 
 	if len(rs) != 0 && len(rs) != noise.DH25519.DHLen() {
 		return nil, nil, nil, errors.New("only 32 byte curve25519 public keys are supported")
@@ -58,10 +58,10 @@ func ComposeInitiatorHandshakeMessage(s noise.DHKey, rs []byte, payload []byte, 
 	prologue = append(prologue, negData...)
 	prologue = append(initString, prologue...)
 	state, err = noise.NewHandshakeState(noise.Config{
-		StaticKeypair: s,
+		StaticKeypair: s.StaticKey,
 		Initiator:     true,
 		Pattern:       pattern,
-		CipherSuite:   noise.NewCipherSuite(noise.DH25519, noise.CipherAESGCM, noise.HashBLAKE2b),
+		CipherSuite:   noise.NewCipherSuite(s.DHFunc, s.CipherFunc, s.HashFunc),
 		PeerStatic:    rs,
 		Prologue:      prologue,
 		Random:        random,
@@ -76,7 +76,7 @@ func ComposeInitiatorHandshakeMessage(s noise.DHKey, rs []byte, payload []byte, 
 	return
 }
 
-func ParseNegotiationData(data []byte, s noise.DHKey) (state *noise.HandshakeState, err error) {
+func ParseNegotiationData(data []byte, s ConnectionConfig) (state *noise.HandshakeState, err error) {
 
 	if len(data) != 6 {
 		return nil, errors.New("Invalid negotiation data length")
@@ -117,9 +117,9 @@ func ParseNegotiationData(data []byte, s noise.DHKey) (state *noise.HandshakeSta
 	prologue = append(prologue, data...)
 	prologue = append(initString, prologue...)
 	state, err = noise.NewHandshakeState(noise.Config{
-		StaticKeypair: s,
+		StaticKeypair: s.StaticKey,
 		Pattern:       pattern,
-		CipherSuite:   noise.NewCipherSuite(noise.DH25519, cipher, hash),
+		CipherSuite:   noise.NewCipherSuite(s.DHFunc, cipher, hash),
 		Prologue:      prologue,
 	})
 	return

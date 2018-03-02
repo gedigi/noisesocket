@@ -1,6 +1,12 @@
 package noisesocket
 
-import "net"
+import (
+	"net"
+	"strconv"
+	"strings"
+
+	"github.com/pkg/errors"
+)
 
 // A listener implements a network listener (net.Listener) for TLS connections.
 type listener struct {
@@ -35,8 +41,25 @@ func Listen(laddr string, config *ConnectionConfig) (net.Listener, error) {
 	}, nil
 }
 
-func Dial(addr string, config *ConnectionConfig) (*Conn, error) {
-	rawConn, err := new(net.Dialer).Dial("tcp", addr)
+func Dial(addr string, localaddr string, config *ConnectionConfig) (*Conn, error) {
+	var dialer *net.Dialer
+
+	localAddrArray := strings.Split(localaddr, ":")
+	if len(localAddrArray) != 2 {
+		return nil, errors.New("invalid source address")
+	}
+	localPort, err := strconv.Atoi(localAddrArray[1])
+	if err != nil {
+		return nil, errors.New("invalid source port")
+	}
+	localAddress := net.ParseIP(localAddrArray[0])
+
+	dialer.LocalAddr = &net.TCPAddr{
+		IP:   localAddress,
+		Port: localPort,
+	}
+
+	rawConn, err := dialer.Dial("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
