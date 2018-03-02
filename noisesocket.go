@@ -64,7 +64,7 @@ func Dial(addr string, localaddr string, config *ConnectionConfig) (*Conn, error
 		return nil, err
 	}
 
-	config.isClient = true
+	config.IsClient = true
 	return &Conn{
 		conn:   rawConn,
 		config: *config,

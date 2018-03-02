@@ -26,7 +26,7 @@ const MaxPayloadSize = math.MaxUint16 - 16 /*mac size*/ - uint16Size /*data len*
 type VerifyCallbackFunc func(publicKey []byte, data []byte) error
 
 type ConnectionConfig struct {
-	isClient       bool
+	IsClient       bool
 	VerifyCallback VerifyCallbackFunc
 	Payload        []byte //certificates, signs etc
 	StaticKey      noise.DHKey
@@ -436,7 +436,7 @@ func (c *Conn) Handshake() error {
 
 	c.handshakeMutex.Lock()
 
-	if c.config.isClient {
+	if c.config.IsClient {
 		c.handshakeErr = c.RunClientHandshake()
 	} else {
 		c.handshakeErr = c.RunServerHandshake()
