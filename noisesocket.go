@@ -30,7 +30,6 @@ func (l *listener) Accept() (net.Conn, error) {
 // Listen creates a TLS listener accepting connections on the
 // given network address using net.Listen.
 func Listen(laddr string, config *ConnectionConfig) (net.Listener, error) {
-
 	l, err := net.Listen("tcp", laddr)
 	if err != nil {
 		return nil, err

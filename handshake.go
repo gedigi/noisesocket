@@ -8,8 +8,6 @@ import (
 	"bytes"
 	"io"
 
-	"fmt"
-
 	"github.com/gedigi/noise"
 	"github.com/pkg/errors"
 )
@@ -31,12 +29,12 @@ func ComposeInitiatorHandshakeMessage(s ConnectionConfig, rs []byte, payload []b
 
 	var pattern noise.HandshakePattern
 
-	negData = make([]byte, 6)
-	copy(negData, negotiationData)
-
 	negotiationData[2] = s.DHFunc
 	negotiationData[3] = s.CipherFunc
 	negotiationData[4] = s.HashFunc
+
+	negData = make([]byte, 6)
+	copy(negData, negotiationData)
 
 	if len(rs) == 0 {
 		pattern = noise.HandshakeXX
@@ -82,19 +80,21 @@ func ParseNegotiationData(data []byte, s ConnectionConfig) (state *noise.Handsha
 		return nil, errors.New("Invalid negotiation data length")
 	}
 
+	var ok bool
+	var dh noise.DHFunc
+	var cipher noise.CipherFunc
+	var hash noise.HashFunc
+	var pattern noise.HandshakePattern
+
 	version := binary.BigEndian.Uint16(data)
 	if version != 1 {
 		return nil, errors.New("unsupported version")
 	}
 
-	if data[2] != NOISE_DH_CURVE25519 {
-		fmt.Println(data[3])
+	dhIndex := data[2]
+	if dh, ok = dhs[dhIndex]; !ok {
 		return nil, errors.New("unsupported DH")
 	}
-	var ok bool
-	var cipher noise.CipherFunc
-	var hash noise.HashFunc
-	var pattern noise.HandshakePattern
 
 	cipherIndex := data[3]
 	if cipher, ok = ciphers[cipherIndex]; !ok {
@@ -119,7 +119,7 @@ func ParseNegotiationData(data []byte, s ConnectionConfig) (state *noise.Handsha
 	state, err = noise.NewHandshakeState(noise.Config{
 		StaticKeypair: s.StaticKey,
 		Pattern:       pattern,
-		CipherSuite:   noise.NewCipherSuite(dhs[s.DHFunc], cipher, hash),
+		CipherSuite:   noise.NewCipherSuite(dh, cipher, hash),
 		Prologue:      prologue,
 	})
 	return
