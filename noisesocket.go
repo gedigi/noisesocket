@@ -42,7 +42,7 @@ func Listen(laddr string, config *ConnectionConfig) (net.Listener, error) {
 }
 
 func Dial(addr string, localaddr string, config *ConnectionConfig) (*Conn, error) {
-	var dialer *net.Dialer
+	dialer := new(net.Dialer)
 
 	localAddrArray := strings.Split(localaddr, ":")
 	if len(localAddrArray) != 2 {
