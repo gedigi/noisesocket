@@ -20,6 +20,10 @@ const (
 	NOISE_PATTERN_IK = 14
 )
 
+var dhs = map[byte]noise.DHFunc{
+	NOISE_DH_CURVE25519: noise.DH25519,
+}
+
 var ciphers = map[byte]noise.CipherFunc{
 	NOISE_CIPHER_CHACHAPOLY: noise.CipherChaChaPoly,
 	NOISE_CIPHER_AESGCM:     noise.CipherAESGCM,

@@ -20,16 +20,12 @@ var initString = []byte("NoiseSocketInit1")
 func init() {
 	negotiationData = make([]byte, 6)
 	binary.BigEndian.PutUint16(negotiationData, 1) //version
-	negotiationData[2] = NOISE_DH_CURVE25519
-	negotiationData[3] = NOISE_CIPHER_AESGCM
-	negotiationData[4] = NOISE_HASH_BLAKE2b
-	//negotiationData[5] //pattern. determined at runtime
 }
 
 // ComposeInitiatorHandshakeMessage generates handshakeState and the first noise message.
 func ComposeInitiatorHandshakeMessage(s ConnectionConfig, rs []byte, payload []byte, ePrivate []byte) (negData, msg []byte, state *noise.HandshakeState, err error) {
 
-	if len(rs) != 0 && len(rs) != noise.DH25519.DHLen() {
+	if len(rs) != 0 && len(rs) != dhs[s.DHFunc].DHLen() {
 		return nil, nil, nil, errors.New("only 32 byte curve25519 public keys are supported")
 	}
 
@@ -37,6 +33,10 @@ func ComposeInitiatorHandshakeMessage(s ConnectionConfig, rs []byte, payload []b
 
 	negData = make([]byte, 6)
 	copy(negData, negotiationData)
+
+	negotiationData[2] = s.DHFunc
+	negotiationData[3] = s.CipherFunc
+	negotiationData[4] = s.HashFunc
 
 	if len(rs) == 0 {
 		pattern = noise.HandshakeXX
@@ -61,7 +61,7 @@ func ComposeInitiatorHandshakeMessage(s ConnectionConfig, rs []byte, payload []b
 		StaticKeypair: s.StaticKey,
 		Initiator:     true,
 		Pattern:       pattern,
-		CipherSuite:   noise.NewCipherSuite(s.DHFunc, s.CipherFunc, s.HashFunc),
+		CipherSuite:   noise.NewCipherSuite(dhs[s.DHFunc], ciphers[s.CipherFunc], hashes[s.HashFunc]),
 		PeerStatic:    rs,
 		Prologue:      prologue,
 		Random:        random,
@@ -119,7 +119,7 @@ func ParseNegotiationData(data []byte, s ConnectionConfig) (state *noise.Handsha
 	state, err = noise.NewHandshakeState(noise.Config{
 		StaticKeypair: s.StaticKey,
 		Pattern:       pattern,
-		CipherSuite:   noise.NewCipherSuite(s.DHFunc, cipher, hash),
+		CipherSuite:   noise.NewCipherSuite(dhs[s.DHFunc], cipher, hash),
 		Prologue:      prologue,
 	})
 	return

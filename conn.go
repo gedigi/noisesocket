@@ -32,9 +32,9 @@ type ConnectionConfig struct {
 	StaticKey      noise.DHKey
 	PeerStatic     []byte
 	Padding        uint16
-	DHFunc         noise.DHFunc
-	CipherFunc     noise.CipherFunc
-	HashFunc       noise.HashFunc
+	DHFunc         byte
+	CipherFunc     byte
+	HashFunc       byte
 }
 
 type ConnectionInfo struct {
