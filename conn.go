@@ -29,7 +29,7 @@ type ConnectionConfig struct {
 	IsClient       bool
 	VerifyCallback VerifyCallbackFunc
 	Payload        []byte //certificates, signs etc
-	StaticKey      noise.DHKey
+	StaticKeypair  noise.DHKey
 	PeerStatic     []byte
 	Padding        uint16
 	DHFunc         byte

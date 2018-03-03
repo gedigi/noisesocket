@@ -56,7 +56,7 @@ func ComposeInitiatorHandshakeMessage(s ConnectionConfig, rs []byte, payload []b
 	prologue = append(prologue, negData...)
 	prologue = append(initString, prologue...)
 	state, err = noise.NewHandshakeState(noise.Config{
-		StaticKeypair: s.StaticKey,
+		StaticKeypair: s.StaticKeypair,
 		Initiator:     true,
 		Pattern:       pattern,
 		CipherSuite:   noise.NewCipherSuite(dhs[s.DHFunc], ciphers[s.CipherFunc], hashes[s.HashFunc]),
@@ -117,7 +117,7 @@ func ParseNegotiationData(data []byte, s ConnectionConfig) (state *noise.Handsha
 	prologue = append(prologue, data...)
 	prologue = append(initString, prologue...)
 	state, err = noise.NewHandshakeState(noise.Config{
-		StaticKeypair: s.StaticKey,
+		StaticKeypair: s.StaticKeypair,
 		Pattern:       pattern,
 		CipherSuite:   noise.NewCipherSuite(dh, cipher, hash),
 		Prologue:      prologue,
