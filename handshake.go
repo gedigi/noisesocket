@@ -26,6 +26,14 @@ func ComposeInitiatorHandshakeMessage(s ConnectionConfig, rs []byte, payload []b
 	if len(rs) != 0 && len(rs) != dhs[s.DHFunc].DHLen() {
 		return nil, nil, nil, errors.New("only 32 byte curve25519 public keys are supported")
 	}
+	negotiationDataNLS := NoiseLinkNegotiationDataRequest1{}
+	negotiationDataNLS.ServerName = "127.0.0.1"
+	negotiationDataNLS.InitialProtocol = "Noise_XX_25519_AESGCM_SHA256"
+	negotiationDataNLS.SwitchProtocol = []string{"Noise_XX_25519_ChaChaPoly_SHA256"}
+	negotiationDataNLS.RetryProtocol = []string{
+		"Noise_XXfallback_25519_AESGCM_SHA256",
+		"Noise_XXfallback_25519_ChaChaPoly_SHA256",
+	}
 
 	var pattern noise.HandshakePattern
 
