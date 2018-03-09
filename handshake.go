@@ -2,6 +2,7 @@ package noisesocket
 
 import (
 	"encoding/binary"
+	"log"
 
 	"crypto/rand"
 
@@ -26,15 +27,6 @@ func ComposeInitiatorHandshakeMessage(s ConnectionConfig, rs []byte, payload []b
 	if len(rs) != 0 && len(rs) != dhs[s.DHFunc].DHLen() {
 		return nil, nil, nil, errors.New("only 32 byte curve25519 public keys are supported")
 	}
-	negotiationDataNLS := NoiseLinkNegotiationDataRequest1{}
-	negotiationDataNLS.ServerName = "127.0.0.1"
-	negotiationDataNLS.InitialProtocol = "Noise_XX_25519_AESGCM_SHA256"
-	negotiationDataNLS.SwitchProtocol = []string{"Noise_XX_25519_ChaChaPoly_SHA256"}
-	negotiationDataNLS.RetryProtocol = []string{
-		"Noise_XXfallback_25519_AESGCM_SHA256",
-		"Noise_XXfallback_25519_ChaChaPoly_SHA256",
-	}
-
 	var pattern noise.HandshakePattern
 
 	negotiationData[2] = s.DHFunc
@@ -63,6 +55,7 @@ func ComposeInitiatorHandshakeMessage(s ConnectionConfig, rs []byte, payload []b
 	binary.BigEndian.PutUint16(prologue, uint16(len(negData)))
 	prologue = append(prologue, negData...)
 	prologue = append(initString, prologue...)
+	log.Printf("%+v", prologue)
 	state, err = noise.NewHandshakeState(noise.Config{
 		StaticKeypair: s.StaticKeypair,
 		Initiator:     true,
