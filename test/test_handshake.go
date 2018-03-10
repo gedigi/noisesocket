@@ -44,7 +44,8 @@ func main() {
 	if err != nil {
 		log.Print(err)
 	}
-	conn.Write([]byte("hello"))
+	n, err := conn.Write([]byte("hello"))
+	log.Printf("writing %d %s\n", n, err)
 	time.Sleep(2 * time.Second)
 	// conn.Close()
 	for {
@@ -62,6 +63,7 @@ func startServer(conf *noisesocket.ConnectionConfig) {
 		log.Print(err)
 	}
 	var msg []byte
-	conn.Read(msg)
+	n, err := conn.Read(msg)
+	log.Printf("reading %d %s\n", n, err)
 	// conn.Close()
 }

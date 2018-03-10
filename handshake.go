@@ -2,7 +2,6 @@ package noisesocket
 
 import (
 	"encoding/binary"
-	"log"
 
 	"crypto/rand"
 
@@ -17,7 +16,6 @@ import (
 var negotiationData []byte
 
 // var initString = []byte("NoiseSocketInit1")
-var initString = []byte("NLS(revision1)")
 
 func init() {
 	negotiationData = make([]byte, 6)
@@ -30,34 +28,25 @@ func ComposeInitiatorHandshakeMessage(s ConnectionConfig, rs []byte, payload []b
 	if len(rs) != 0 && len(rs) != dhs[s.DHFunc].DHLen() {
 		return nil, nil, nil, errors.New("only 32 byte curve25519 public keys are supported")
 	}
-	// var pattern noise.HandshakePattern
+	var initString = []byte("NLS(revision1)")
 
 	negotiationDataNLS := &NoiseLinkNegotiationDataRequest1{}
 	negotiationDataNLS.ServerName = "127.0.0.1"
-	negotiationDataNLS.InitialProtocol = "Noise_XX_25519_AESGCM_SHA256"
-	negotiationDataNLS.SwitchProtocol = []string{"Noise_XX_25519_ChaChaPoly_SHA256"}
-	negotiationDataNLS.RetryProtocol = []string{
-		"Noise_XXfallback_25519_AESGCM_SHA256",
-		"Noise_XXfallback_25519_ChaChaPoly_SHA256",
+	if len(rs) == 0 {
+		negotiationDataNLS.InitialProtocol = "Noise_XX_25519_AESGCM_SHA256"
+		negotiationDataNLS.SwitchProtocol = []string{"Noise_XX_25519_ChaChaPoly_SHA256"}
+	} else {
+		negotiationDataNLS.InitialProtocol = "Noise_IK_25519_AESGCM_SHA256"
+		negotiationDataNLS.SwitchProtocol = []string{
+			"Noise_XX_25519_AESGCM_SHA256",
+			"Noise_XX_25519_ChaChaPoly_SHA256",
+		}
 	}
+
 	negData, err = proto.Marshal(negotiationDataNLS)
 	if err != nil {
-		log.Print(err)
+		return nil, nil, nil, errors.New("Invalid payload")
 	}
-	// negotiationData[2] = s.DHFunc
-	// negotiationData[3] = s.CipherFunc
-	// negotiationData[4] = s.HashFunc
-
-	// negData = make([]byte, 6)
-	// copy(negData, negotiationData)
-
-	// if len(rs) == 0 {
-	// 	pattern = noise.HandshakeXX
-	// 	negData[5] = NOISE_PATTERN_XX
-	// } else {
-	// 	pattern = noise.HandshakeIK
-	// 	negData[5] = NOISE_PATTERN_IK
-	// }
 
 	var random io.Reader
 	if len(ePrivate) == 0 {
@@ -90,56 +79,40 @@ func ComposeInitiatorHandshakeMessage(s ConnectionConfig, rs []byte, payload []b
 }
 
 func ParseNegotiationData(data []byte, s ConnectionConfig) (state *noise.HandshakeState, err error) {
+	var initString = []byte("NLS(revision1)")
 
 	negotiationData := &NoiseLinkNegotiationDataRequest1{}
 	if err := proto.Unmarshal(data, negotiationData); err != nil {
-		return nil, nil
-	}
-	log.Printf("SERVER: %+v", negotiationData)
-	if len(data) != 6 {
-		return nil, errors.New("Invalid negotiation data length")
-	}
-	var ok bool
-	var dh noise.DHFunc
-	var cipher noise.CipherFunc
-	var hash noise.HashFunc
-	var pattern noise.HandshakePattern
-
-	version := binary.BigEndian.Uint16(data)
-	if version != 1 {
-		return nil, errors.New("unsupported version")
+		return nil, errors.New("Invalid negotiation data")
 	}
 
-	dhIndex := data[2]
-	if dh, ok = dhs[dhIndex]; !ok {
-		return nil, errors.New("unsupported DH")
+	var protocolName string
+	if _, ok := supportedProtocols[negotiationData.InitialProtocol]; !ok {
+		for _, pName := range negotiationData.SwitchProtocol {
+			if _, ok := supportedProtocols[pName]; ok {
+				protocolName = pName
+				goto success
+			}
+		}
+		return nil, errors.New("Protocol not supported")
 	}
-
-	cipherIndex := data[3]
-	if cipher, ok = ciphers[cipherIndex]; !ok {
-		return nil, errors.New("unsupported cipher")
-	}
-
-	hashIndex := data[4]
-	if hash, ok = hashes[hashIndex]; !ok {
-		return nil, errors.New("unsupported hash")
-	}
-
-	patternIndex := data[5]
-
-	if pattern, ok = patterns[patternIndex]; !ok {
-		return nil, errors.New("unsupported pattern")
-	}
-
+	protocolName = negotiationData.InitialProtocol
+success:
+	data = nil
+	pattern, dh, cipher, hash, err := parseProtocolName(protocolName)
 	prologue := make([]byte, 2, uint16Size+len(data))
 	binary.BigEndian.PutUint16(prologue, uint16(len(data)))
 	prologue = append(prologue, data...)
 	prologue = append(initString, prologue...)
 	state, err = noise.NewHandshakeState(noise.Config{
 		StaticKeypair: s.StaticKeypair,
-		Pattern:       pattern,
-		CipherSuite:   noise.NewCipherSuite(dh, cipher, hash),
-		Prologue:      prologue,
+		Pattern:       patternByteObj[pattern],
+		CipherSuite: noise.NewCipherSuite(
+			dhByteObj[dh],
+			cipherByteObj[cipher],
+			hashByteObj[hash],
+		),
+		Prologue: prologue,
 	})
 	return
 }
