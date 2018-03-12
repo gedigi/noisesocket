@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"fmt"
 	"log"
 	"time"
 
@@ -12,14 +13,8 @@ import (
 func main() {
 	var ncClient, ncServer noisesocket.ConnectionConfig
 
-	cs := noise.NewCipherSuite(
-		noise.DH25519,
-		noise.CipherAESGCM,
-		noise.HashSHA256,
-	)
-
-	clientKey, _ := cs.GenerateKeypair(rand.Reader)
-	serverKey, _ := cs.GenerateKeypair(rand.Reader)
+	clientKey, _ := noise.DH25519.GenerateKeypair(rand.Reader)
+	serverKey, _ := noise.DH25519.GenerateKeypair(rand.Reader)
 
 	ncClient = noisesocket.ConnectionConfig{
 		IsClient:      true,
@@ -34,8 +29,9 @@ func main() {
 		StaticKeypair: serverKey,
 	}
 
+	serverChan := make(chan string)
 	// Server
-	go startServer(&ncServer)
+	go startServer(&ncServer, &serverChan)
 	time.Sleep(2 * time.Second)
 
 	// Client
@@ -44,15 +40,15 @@ func main() {
 	if err != nil {
 		log.Print(err)
 	}
-	n, err := conn.Write([]byte("hello"))
-	log.Printf("writing %d %s\n", n, err)
-	time.Sleep(2 * time.Second)
-	// conn.Close()
-	for {
-	}
+
+	msg := []byte("hello")
+	n, err := conn.Write(msg)
+	log.Printf("writing %d %s %s\n", n, err, msg)
+	log.Printf("%s", <-serverChan)
+	conn.Close()
 }
 
-func startServer(conf *noisesocket.ConnectionConfig) {
+func startServer(conf *noisesocket.ConnectionConfig, c *chan string) {
 	log.Print("Starting server")
 	dialer, err := noisesocket.Listen("127.0.0.1:12345", conf)
 	if err != nil {
@@ -62,8 +58,8 @@ func startServer(conf *noisesocket.ConnectionConfig) {
 	if err != nil {
 		log.Print(err)
 	}
-	var msg []byte
+	defer conn.Close()
+	msg := make([]byte, 5)
 	n, err := conn.Read(msg)
-	log.Printf("reading %d %s\n", n, err)
-	// conn.Close()
+	*c <- fmt.Sprintf("reading %d %s %s\n", n, err, msg)
 }

@@ -45,7 +45,7 @@ func ComposeInitiatorHandshakeMessage(s ConnectionConfig, rs []byte, payload []b
 
 	negData, err = proto.Marshal(negotiationDataNLS)
 	if err != nil {
-		return nil, nil, nil, errors.New("Invalid payload")
+		return nil, nil, nil, errors.New("Invalid negotiation data")
 	}
 
 	var random io.Reader
@@ -98,7 +98,7 @@ func ParseNegotiationData(data []byte, s ConnectionConfig) (state *noise.Handsha
 	}
 	protocolName = negotiationData.InitialProtocol
 success:
-	data = nil
+	// data = nil
 	pattern, dh, cipher, hash, err := parseProtocolName(protocolName)
 	prologue := make([]byte, 2, uint16Size+len(data))
 	binary.BigEndian.PutUint16(prologue, uint16(len(data)))
