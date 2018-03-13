@@ -479,49 +479,30 @@ func (c *Conn) RunClientHandshake() error {
 		return err
 	}
 
-	// restartHandshake:
 	//read negotiation data
 	if err := c.readPacket(); err != nil {
 		return err
 	}
 
-	rNegotiationData := c.hand.Next(c.hand.Len())
+	responderNegData := c.hand.Next(c.hand.Len())
 
 	//read noise message
 	if err := c.readPacket(); err != nil {
 		return err
 	}
 
-	noiseMsg := c.hand.Next(c.hand.Len())
+	responderNoiseMsg := c.hand.Next(c.hand.Len())
 	// cannot reuse msg for read, need another buf
 	inBlock := c.in.newBlock()
-	inBlock.reserve(len(noiseMsg))
-	payload, csIn, csOut, err := state.ReadMessage(inBlock.data, noiseMsg)
+	inBlock.reserve(len(responderNoiseMsg))
+	payload, csIn, csOut, err := state.ReadMessage(inBlock.data, responderNoiseMsg)
 	if err != nil {
 		c.in.freeBlock(inBlock)
 		return err
 	}
-
-	// if len(rNegotiationData) != 0 || len(msg) == 0 || err != nil {
-	// 	rNegData := &NoiseLinkNegotiationDataResponse1{}
-	// 	proto.Unmarshal(rNegotiationData, rNegData)
-	// 	var initString []byte
-	// 	if rNegData.GetSwitchProtocol() != "" {
-	// 		initString = []byte("NoiseSocketInit2")
-	// 	} else if rNegData.GetRetryProtocol() != "" {
-	// 		initString = []byte("NoiseSocketInit3")
-	// 	} else {
-	// 		initString = nil
-	// 	}
-	// 	if negData, msg, state, err = InitiatorHandshake(c.config, NegotiationData{
-	// 		RemoteNegData:   negData,
-	// 		RemoteNoiseMsg:  noiseMsg,
-	// 		ResponseNegData: rNegData,
-	// 		InitString:      initString,
-	// 	}); err != nil {
-	// 		return err
-	// 	}
-	// }
+	if len(responderNegData) != 0 || err != nil {
+		// TODO: add handling of responder's negdata
+	}
 
 	c.processCallback(state.PeerStatic(), payload)
 	c.in.freeBlock(inBlock)
@@ -560,15 +541,19 @@ func (c *Conn) RunClientHandshake() error {
 }
 
 func (c *Conn) RunServerHandshake() error {
-	var csOut, csIn *noise.CipherState
-startHandshake:
+	var (
+		negData, msg []byte
+		state        *noise.HandshakeState
+		err          error
+		csIn, csOut  *noise.CipherState
+	)
 
-	if err := c.readPacket(); err != nil {
+	if err = c.readPacket(); err != nil {
 		return err
 	}
 
-	iNegData := c.hand.Next(c.hand.Len())
-	rNegData, hs, err := ParseNegotiationData(iNegData, c.config)
+	InitiatorNegotiationData := c.hand.Next(c.hand.Len())
+	ReponderNegotiationData, state, err := ParseNegotiationData(InitiatorNegotiationData, c.config)
 
 	if err != nil {
 		return err
@@ -579,14 +564,31 @@ startHandshake:
 		return err
 	}
 
-	iNoiseMsg := c.hand.Next(c.hand.Len())
+	InitiatorNoiseMsg := c.hand.Next(c.hand.Len())
 
-	payload, _, _, err := hs.ReadMessage(nil, iNoiseMsg)
+	payload, _, _, err := state.ReadMessage(nil, InitiatorNoiseMsg)
 
-	// Protocol switch, retry, or reject
-	if (rNegData != nil) || (err != nil) {
-		var negData, msg []byte
-		negData, msg, hs, err = ComposeFallbackHandshakeMessage(rNegData, iNoiseMsg, iNegData, c.config)
+	if ReponderNegotiationData != nil || err != nil {
+		var initString string
+		if ReponderNegotiationData.GetSwitchProtocol() != "" {
+			// Switch
+			initString = "NoiseSocketInit2"
+		} else if ReponderNegotiationData.GetRetryProtocol() != "" {
+			// Retry
+			initString = "NoiseSocketInit3"
+		} else {
+			// Reject
+			initString = ""
+		}
+		negData, msg, state, err = InitiatorHandshake(c.config, NegotiationData{
+			RemoteNegData:   InitiatorNegotiationData,
+			RemoteNoiseMsg:  InitiatorNoiseMsg,
+			ResponseNegData: ReponderNegotiationData,
+			InitString:      []byte(initString),
+		})
+		if err != nil {
+			return err
+		}
 
 		// Send negotiation Data back
 		_, err = c.writePacket(negData)
@@ -594,37 +596,35 @@ startHandshake:
 			return err
 		}
 
-		// Send empty noise message
+		// Send noise message
 		_, err = c.writePacket(msg)
 		if err != nil {
 			return err
 		}
+	} else {
+		b := c.out.newBlock()
 
-		// Resets the handshake
-		goto startHandshake
-	}
-
-	err = c.processCallback(hs.PeerStatic(), payload)
-	if err != nil {
-		return err
-	}
-
-	b := c.out.newBlock()
-
-	if b.data, csOut, csIn, err = hs.WriteMessage(b.data, c.config.Payload); err != nil {
+		if b.data, csOut, csIn, err = state.WriteMessage(b.data, c.config.Payload); err != nil {
+			c.out.freeBlock(b)
+			return err
+		}
+		//empty negotiation data
+		_, err = c.writePacket(nil)
+		if err != nil {
+			c.out.freeBlock(b)
+			return err
+		}
+		_, err = c.writePacket(b.data)
 		c.out.freeBlock(b)
-		return err
+		if err != nil {
+			return err
+		}
 	}
-	//empty negotiation data
-	_, err = c.writePacket(nil)
-	if err != nil {
-		c.out.freeBlock(b)
-		return err
-	}
-	_, err = c.writePacket(b.data)
-	c.out.freeBlock(b)
-	if err != nil {
-		return err
+	if state.PeerStatic() != nil {
+		err = c.processCallback(state.PeerStatic(), payload)
+		if err != nil {
+			return err
+		}
 	}
 
 	if csIn == nil && csOut == nil {
@@ -645,7 +645,7 @@ startHandshake:
 		inBlock := c.in.newBlock()
 		data := c.hand.Next(c.hand.Len())
 		inBlock.reserve(len(data))
-		payload, csOut, csIn, err = hs.ReadMessage(inBlock.data[:0], data)
+		payload, csOut, csIn, err = state.ReadMessage(inBlock.data[:0], data)
 
 		c.in.freeBlock(inBlock)
 
@@ -653,9 +653,11 @@ startHandshake:
 			return err
 		}
 
-		err = c.processCallback(hs.PeerStatic(), payload)
-		if err != nil {
-			return err
+		if state.PeerStatic() != nil {
+			err = c.processCallback(state.PeerStatic(), payload)
+			if err != nil {
+				return err
+			}
 		}
 
 		if csIn == nil || csOut == nil {
@@ -665,8 +667,8 @@ startHandshake:
 	c.in.cs = csOut
 	c.out.cs = csIn
 	c.in.padding, c.out.padding = c.config.Padding, c.config.Padding
-	c.channelBinding = hs.ChannelBinding()
-	c.config.PeerStatic = hs.PeerStatic()
+	c.channelBinding = state.ChannelBinding()
+	c.config.PeerStatic = state.PeerStatic()
 
 	/*info := &ConnectionInfo{
 		Name: "Noise",

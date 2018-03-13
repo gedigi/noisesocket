@@ -124,6 +124,7 @@ func ParseNegotiationData(data []byte, s ConnectionConfig) (*NoiseLinkNegotiatio
 		return nil, nil, err
 	}
 
+	// Accept
 	if _, ok := supportedProtocols[negotiationData.InitialProtocol]; ok {
 		var initString = []byte("NoiseSocketInit1")
 		pattern, dh, cipher, hash, err := parseProtocolName(negotiationData.InitialProtocol)
@@ -153,6 +154,7 @@ func ParseNegotiationData(data []byte, s ConnectionConfig) (*NoiseLinkNegotiatio
 
 	negotiationDataNLS := &NoiseLinkNegotiationDataResponse1{}
 
+	// Switch
 	for _, pName := range negotiationData.SwitchProtocol {
 		if _, ok := supportedProtocols[pName]; ok {
 			negotiationDataNLS.Response = &NoiseLinkNegotiationDataResponse1_SwitchProtocol{
@@ -161,6 +163,8 @@ func ParseNegotiationData(data []byte, s ConnectionConfig) (*NoiseLinkNegotiatio
 			goto returnFunc
 		}
 	}
+
+	// Retry
 	for _, pName := range negotiationData.RetryProtocol {
 		if _, ok := supportedProtocols[pName]; ok {
 			negotiationDataNLS.Response = &NoiseLinkNegotiationDataResponse1_RetryProtocol{
@@ -169,6 +173,8 @@ func ParseNegotiationData(data []byte, s ConnectionConfig) (*NoiseLinkNegotiatio
 			goto returnFunc
 		}
 	}
+
+	// Reject
 	negotiationDataNLS.Response = &NoiseLinkNegotiationDataResponse1_Rejected{
 		Rejected: true,
 	}
