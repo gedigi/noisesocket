@@ -474,12 +474,13 @@ func (c *Conn) RunClientHandshake() error {
 		return err
 	}
 
+	// restartHandshake:
 	//read negotiation data
 	if err := c.readPacket(); err != nil {
 		return err
 	}
 
-	negotiationData := c.hand.Next(c.hand.Len())
+	rNegotiationData := c.hand.Next(c.hand.Len())
 
 	//read noise message
 	if err := c.readPacket(); err != nil {
@@ -488,8 +489,13 @@ func (c *Conn) RunClientHandshake() error {
 
 	msg = c.hand.Next(c.hand.Len())
 
-	if len(negotiationData) != 0 || len(msg) == 0 {
-		return errors.New("Server returned error")
+	if len(rNegotiationData) != 0 || len(msg) == 0 {
+		// 	negData, msg, state, err = handleResponse(state, negData, msg, rNegotiationData)
+		// 	if err != nil {
+		// 		return err
+		// 	}
+		// 	goto restartHandshake
+		return errors.New("fallback not supported")
 	}
 
 	// cannot reuse msg for read, need another buf
@@ -539,23 +545,47 @@ func (c *Conn) RunClientHandshake() error {
 
 func (c *Conn) RunServerHandshake() error {
 	var csOut, csIn *noise.CipherState
+startHandshake:
+
 	if err := c.readPacket(); err != nil {
 		return err
 	}
 
-	hs, err := ParseNegotiationData(c.hand.Next(c.hand.Len()), c.config)
+	iNegData := c.hand.Next(c.hand.Len())
+	rNegData, hs, err := ParseNegotiationData(iNegData, c.config)
 
 	if err != nil {
 		return err
 	}
+
 	//read noise message
 	if err := c.readPacket(); err != nil {
 		return err
 	}
-	payload, _, _, err := hs.ReadMessage(nil, c.hand.Next(c.hand.Len()))
 
-	if err != nil {
-		return err
+	iNoiseMsg := c.hand.Next(c.hand.Len())
+
+	payload, _, _, err := hs.ReadMessage(nil, iNoiseMsg)
+
+	// Protocol switch, retry, or reject
+	if rNegData != nil || err != nil {
+		var negData, msg []byte
+		negData, msg, hs, err = ComposeFallbackHandshakeMessage(rNegData, iNoiseMsg, iNegData, c.config)
+
+		// Send negotiation Data back
+		_, err = c.writePacket(negData)
+		if err != nil {
+			return err
+		}
+
+		// Send empty noise message
+		_, err = c.writePacket(msg)
+		if err != nil {
+			return err
+		}
+
+		// Resets the handshake
+		goto startHandshake
 	}
 
 	err = c.processCallback(hs.PeerStatic(), payload)
