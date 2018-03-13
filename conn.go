@@ -28,13 +28,16 @@ type VerifyCallbackFunc func(publicKey []byte, data []byte) error
 type ConnectionConfig struct {
 	IsClient       bool
 	VerifyCallback VerifyCallbackFunc
-	Payload        []byte //certificates, signs etc
-	StaticKeypair  noise.DHKey
-	PeerStatic     []byte
-	Padding        uint16
-	DHFunc         byte
-	CipherFunc     byte
-	HashFunc       byte
+
+	Payload       []byte //certificates, signs etc
+	StaticKeypair noise.DHKey
+	PeerStatic    []byte
+
+	Padding uint16
+
+	DHFunc     byte
+	CipherFunc byte
+	HashFunc   byte
 }
 
 type ConnectionInfo struct {
@@ -464,7 +467,9 @@ func (c *Conn) RunClientHandshake() error {
 		csIn, csOut  *noise.CipherState
 	)
 
-	if negData, msg, state, err = ComposeInitiatorHandshakeMessage(c.config, nil, nil, nil); err != nil {
+	if negData, msg, state, err = InitiatorHandshake(c.config, NegotiationData{
+		InitString: []byte("NoiseSocketInit1"),
+	}); err != nil {
 		return err
 	}
 	if _, err = c.writePacket(negData); err != nil {
@@ -487,25 +492,36 @@ func (c *Conn) RunClientHandshake() error {
 		return err
 	}
 
-	msg = c.hand.Next(c.hand.Len())
-
-	if len(rNegotiationData) != 0 || len(msg) == 0 {
-		// 	negData, msg, state, err = handleResponse(state, negData, msg, rNegotiationData)
-		// 	if err != nil {
-		// 		return err
-		// 	}
-		// 	goto restartHandshake
-		return errors.New("fallback not supported")
-	}
-
+	noiseMsg := c.hand.Next(c.hand.Len())
 	// cannot reuse msg for read, need another buf
 	inBlock := c.in.newBlock()
-	inBlock.reserve(len(msg))
-	payload, csIn, csOut, err := state.ReadMessage(inBlock.data, msg)
+	inBlock.reserve(len(noiseMsg))
+	payload, csIn, csOut, err := state.ReadMessage(inBlock.data, noiseMsg)
 	if err != nil {
 		c.in.freeBlock(inBlock)
 		return err
 	}
+
+	// if len(rNegotiationData) != 0 || len(msg) == 0 || err != nil {
+	// 	rNegData := &NoiseLinkNegotiationDataResponse1{}
+	// 	proto.Unmarshal(rNegotiationData, rNegData)
+	// 	var initString []byte
+	// 	if rNegData.GetSwitchProtocol() != "" {
+	// 		initString = []byte("NoiseSocketInit2")
+	// 	} else if rNegData.GetRetryProtocol() != "" {
+	// 		initString = []byte("NoiseSocketInit3")
+	// 	} else {
+	// 		initString = nil
+	// 	}
+	// 	if negData, msg, state, err = InitiatorHandshake(c.config, NegotiationData{
+	// 		RemoteNegData:   negData,
+	// 		RemoteNoiseMsg:  noiseMsg,
+	// 		ResponseNegData: rNegData,
+	// 		InitString:      initString,
+	// 	}); err != nil {
+	// 		return err
+	// 	}
+	// }
 
 	c.processCallback(state.PeerStatic(), payload)
 	c.in.freeBlock(inBlock)
@@ -568,7 +584,7 @@ startHandshake:
 	payload, _, _, err := hs.ReadMessage(nil, iNoiseMsg)
 
 	// Protocol switch, retry, or reject
-	if rNegData != nil || err != nil {
+	if (rNegData != nil) || (err != nil) {
 		var negData, msg []byte
 		negData, msg, hs, err = ComposeFallbackHandshakeMessage(rNegData, iNoiseMsg, iNegData, c.config)
 
