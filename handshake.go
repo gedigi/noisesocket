@@ -18,7 +18,7 @@ func init() {
 	binary.BigEndian.PutUint16(negotiationData, 1) //version
 }
 
-// ComposeInitiatorHandshakeMessage generates handshakeState and the first noise message.
+// InitiatorHandshake generates appropriate handshakeState and noise message
 func InitiatorHandshake(s ConnectionConfig, n NegotiationData) (
 	negData, msg []byte,
 	state *noise.HandshakeState,
@@ -32,8 +32,8 @@ func InitiatorHandshake(s ConnectionConfig, n NegotiationData) (
 		negotiationDataNLS := &NoiseLinkNegotiationDataRequest1{}
 		negotiationDataNLS.ServerName = "127.0.0.1"
 		if len(s.PeerStatic) == 0 {
-			negotiationDataNLS.InitialProtocol = "Noise_XX_25519_AESGCM_SHA256"
-			negotiationDataNLS.SwitchProtocol = []string{"Noise_XX_25519_ChaChaPoly_SHA256"}
+			negotiationDataNLS.InitialProtocol = "Noise_XX_25519_ChaChaPoly_SHA256"
+			negotiationDataNLS.SwitchProtocol = []string{"Noise_XX_25519_AESGCM_SHA256"}
 		} else {
 			negotiationDataNLS.InitialProtocol = "Noise_IK_25519_AESGCM_SHA256"
 			negotiationDataNLS.SwitchProtocol = []string{
@@ -47,6 +47,8 @@ func InitiatorHandshake(s ConnectionConfig, n NegotiationData) (
 			return nil, nil, nil, errors.New("Invalid negotiation data")
 		}
 
+		var pattern, dh, cipher, hash byte
+		pattern, dh, cipher, hash, err = parseProtocolName(negotiationDataNLS.InitialProtocol)
 		prologue := make([]byte, 2, uint16Size+len(negData))
 		binary.BigEndian.PutUint16(prologue, uint16(len(negData)))
 		prologue = append(prologue, negData...)
@@ -55,10 +57,14 @@ func InitiatorHandshake(s ConnectionConfig, n NegotiationData) (
 		state, err = noise.NewHandshakeState(noise.Config{
 			StaticKeypair: s.StaticKeypair,
 			Initiator:     true,
-			Pattern:       noise.HandshakeXX,
-			CipherSuite:   noise.NewCipherSuite(noise.DH25519, noise.CipherAESGCM, noise.HashSHA256),
-			PeerStatic:    s.PeerStatic,
-			Prologue:      prologue,
+			Pattern:       patternByteObj[pattern],
+			CipherSuite: noise.NewCipherSuite(
+				dhByteObj[dh],
+				cipherByteObj[cipher],
+				hashByteObj[hash],
+			),
+			PeerStatic: s.PeerStatic,
+			Prologue:   prologue,
 		})
 
 		if err != nil {
@@ -79,6 +85,8 @@ func InitiatorHandshake(s ConnectionConfig, n NegotiationData) (
 	if n.ResponseNegData.GetRejected() != false {
 		return negData, nil, nil, nil
 	}
+	var pattern, dh, cipher, hash byte
+	pattern, dh, cipher, hash, err = parseProtocolName(n.ProtocolnName)
 
 	// original negotiation data
 	prologue := make([]byte, 2, uint16Size+len(n.RemoteNegData))
@@ -100,14 +108,23 @@ func InitiatorHandshake(s ConnectionConfig, n NegotiationData) (
 	prologue = append(n.InitString, prologue...)
 	prologue = append(prologue, appPrologue...)
 
-	state, err = noise.NewHandshakeState(noise.Config{
+	nConfig := noise.Config{
 		StaticKeypair: s.StaticKeypair,
 		Initiator:     true,
-		Pattern:       noise.HandshakeXX,
-		CipherSuite:   noise.NewCipherSuite(noise.DH25519, noise.CipherAESGCM, noise.HashSHA256),
-		Prologue:      prologue,
-		Random:        rand.Reader,
-	})
+		Pattern:       patternByteObj[pattern],
+		CipherSuite: noise.NewCipherSuite(
+			dhByteObj[dh],
+			cipherByteObj[cipher],
+			hashByteObj[hash],
+		),
+		Prologue: prologue,
+		Random:   rand.Reader,
+	}
+	if n.RemoteEphemeral != nil {
+		nConfig.PeerEphemeral = n.RemoteEphemeral
+	}
+
+	state, err = noise.NewHandshakeState(nConfig)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -188,5 +205,7 @@ type NegotiationData struct {
 	InitString      []byte
 	RemoteNoiseMsg  []byte
 	RemoteNegData   []byte
+	RemoteEphemeral []byte
 	ResponseNegData *NoiseLinkNegotiationDataResponse1
+	ProtocolnName   string
 }
