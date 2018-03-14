@@ -24,6 +24,7 @@ func main() {
 		DHFunc:        noisesocket.NOISE_DH_CURVE25519,
 		CipherFunc:    noisesocket.NOISE_CIPHER_AESGCM,
 		HashFunc:      noisesocket.NOISE_HASH_SHA256,
+		PeerStatic:    clientKey.Public,
 	}
 	ncServer = noisesocket.ConnectionConfig{
 		IsClient:      false,

@@ -16,7 +16,7 @@ func init() {
 	binary.BigEndian.PutUint16(negotiationData, 1) //version
 }
 
-// ComposeInitiatorHandshakeMessage generates handshakeState and the first noise message.
+// InitiatorHandshake generates appropriate handshakeState and noise message
 func InitiatorHandshake(s ConnectionConfig, n NegotiationData) (
 	negData, msg []byte,
 	state *noise.HandshakeState,
@@ -156,7 +156,9 @@ type NegotiationData struct {
 	InitString      []byte
 	RemoteNoiseMsg  []byte
 	RemoteNegData   []byte
+	RemoteEphemeral []byte
 	ResponseNegData *NoiseLinkNegotiationDataResponse1
+	ProtocolnName   string
 }
 
 func makePrologue(dataSlice [][]byte, initString []byte) []byte {
