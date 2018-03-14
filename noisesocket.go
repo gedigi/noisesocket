@@ -64,6 +64,8 @@ func Dial(addr string, localaddr string, config *ConnectionConfig) (*Conn, error
 	}
 
 	config.IsClient = true
+	serverHostname, _, _ := net.SplitHostPort(addr)
+	config.ServerHostname = serverHostname
 	return &Conn{
 		conn:   rawConn,
 		config: *config,

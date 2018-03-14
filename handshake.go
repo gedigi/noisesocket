@@ -3,9 +3,7 @@ package noisesocket
 import (
 	"encoding/binary"
 
-	"crypto/rand"
-
-	"github.com/gedigi/noise"
+	"github.com/gedigi/noisesocket/noise"
 	proto "github.com/golang/protobuf/proto"
 	"github.com/pkg/errors"
 )
@@ -24,22 +22,28 @@ func InitiatorHandshake(s ConnectionConfig, n NegotiationData) (
 	state *noise.HandshakeState,
 	err error,
 ) {
+	var (
+		prologue []byte
+		pattern  noise.HandshakePattern
+	)
 
 	if len(s.PeerStatic) != 0 && len(s.PeerStatic) != dhs[s.DHFunc].DHLen() {
 		return nil, nil, nil, errors.New("only 32 byte curve25519 public keys are supported")
 	}
 	if n.ResponseNegData == nil {
 		negotiationDataNLS := &NoiseLinkNegotiationDataRequest1{}
-		negotiationDataNLS.ServerName = "127.0.0.1"
+		negotiationDataNLS.ServerName = s.ServerHostname
 		if len(s.PeerStatic) == 0 {
 			negotiationDataNLS.InitialProtocol = "Noise_XX_25519_AESGCM_SHA256"
 			negotiationDataNLS.SwitchProtocol = []string{"Noise_XX_25519_ChaChaPoly_SHA256"}
+			pattern = noise.HandshakeXX
 		} else {
 			negotiationDataNLS.InitialProtocol = "Noise_IK_25519_AESGCM_SHA256"
 			negotiationDataNLS.SwitchProtocol = []string{
 				"Noise_XX_25519_AESGCM_SHA256",
 				"Noise_XX_25519_ChaChaPoly_SHA256",
 			}
+			pattern = noise.HandshakeIK
 		}
 
 		negData, err = proto.Marshal(negotiationDataNLS)
@@ -47,67 +51,33 @@ func InitiatorHandshake(s ConnectionConfig, n NegotiationData) (
 			return nil, nil, nil, errors.New("Invalid negotiation data")
 		}
 
-		prologue := make([]byte, 2, uint16Size+len(negData))
-		binary.BigEndian.PutUint16(prologue, uint16(len(negData)))
-		prologue = append(prologue, negData...)
-		prologue = append(n.InitString, prologue...)
-		prologue = append(prologue, appPrologue...)
-		state, err = noise.NewHandshakeState(noise.Config{
-			StaticKeypair: s.StaticKeypair,
-			Initiator:     true,
-			Pattern:       noise.HandshakeXX,
-			CipherSuite:   noise.NewCipherSuite(noise.DH25519, noise.CipherAESGCM, noise.HashSHA256),
-			PeerStatic:    s.PeerStatic,
-			Prologue:      prologue,
-		})
-
-		if err != nil {
-			return
-		}
-
-		msg, _, _, err = state.WriteMessage(msg, s.Payload)
-
-		return
-	}
-	if n.ResponseNegData != nil {
+		prologue = makePrologue([][]byte{negData}, n.InitString)
+	} else {
+		pattern = noise.HandshakeXX
 		negData, err = proto.Marshal(n.ResponseNegData)
 		if err != nil {
 			return nil, nil, nil, err
 		}
+
+		switch n.ResponseNegData.GetResponse().(type) {
+		case *NoiseLinkNegotiationDataResponse1_Rejected:
+			return negData, nil, nil, nil
+		}
+		prologue = makePrologue([][]byte{
+			n.RemoteNegData,
+			n.RemoteNoiseMsg,
+			negData,
+		}, n.InitString)
 	}
-
-	if n.ResponseNegData.GetRejected() != false {
-		return negData, nil, nil, nil
-	}
-
-	// original negotiation data
-	prologue := make([]byte, 2, uint16Size+len(n.RemoteNegData))
-	binary.BigEndian.PutUint16(prologue, uint16(len(n.RemoteNegData)))
-	prologue = append(prologue, n.RemoteNegData...)
-
-	// original noise message
-	rNoiseMsgLen := make([]byte, 2, uint16Size+len(n.RemoteNoiseMsg))
-	binary.BigEndian.PutUint16(rNoiseMsgLen, uint16(len(n.RemoteNoiseMsg)))
-	prologue = append(prologue, rNoiseMsgLen...)
-	prologue = append(prologue, n.RemoteNoiseMsg...)
-
-	// responder negotiation data
-	negDataLen := make([]byte, 2, uint16Size+len(negData))
-	binary.BigEndian.PutUint16(negDataLen, uint16(len(negData)))
-	prologue = append(prologue, negDataLen...)
-	prologue = append(prologue, negData...)
-
-	prologue = append(n.InitString, prologue...)
-	prologue = append(prologue, appPrologue...)
-
 	state, err = noise.NewHandshakeState(noise.Config{
 		StaticKeypair: s.StaticKeypair,
 		Initiator:     true,
-		Pattern:       noise.HandshakeXX,
+		Pattern:       pattern,
 		CipherSuite:   noise.NewCipherSuite(noise.DH25519, noise.CipherAESGCM, noise.HashSHA256),
+		PeerStatic:    s.PeerStatic,
 		Prologue:      prologue,
-		Random:        rand.Reader,
 	})
+
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -131,11 +101,9 @@ func ParseNegotiationData(data []byte, s ConnectionConfig) (*NoiseLinkNegotiatio
 		if err != nil {
 			return nil, nil, err
 		}
-		prologue := make([]byte, 2, uint16Size+len(data))
-		binary.BigEndian.PutUint16(prologue, uint16(len(data)))
-		prologue = append(prologue, data...)
-		prologue = append(initString, prologue...)
-		prologue = append(prologue, appPrologue...)
+
+		prologue := makePrologue([][]byte{data}, initString)
+
 		state, err := noise.NewHandshakeState(noise.Config{
 			StaticKeypair: s.StaticKeypair,
 			Pattern:       patternByteObj[pattern],
@@ -189,4 +157,16 @@ type NegotiationData struct {
 	RemoteNoiseMsg  []byte
 	RemoteNegData   []byte
 	ResponseNegData *NoiseLinkNegotiationDataResponse1
+}
+
+func makePrologue(dataSlice [][]byte, initString []byte) []byte {
+	var output []byte
+	output = append(initString, output...)
+	for _, data := range dataSlice {
+		dataLen := make([]byte, 2, uint16Size+len(data))
+		binary.BigEndian.PutUint16(dataLen, uint16(len(data)))
+		output = append(dataLen, data...)
+	}
+	output = append(output, appPrologue...)
+	return output
 }

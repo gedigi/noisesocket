@@ -6,8 +6,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/gedigi/noise"
 	"github.com/gedigi/noisesocket"
+	"github.com/gedigi/noisesocket/noise"
 )
 
 func main() {
@@ -15,6 +15,8 @@ func main() {
 
 	clientKey, _ := noise.DH25519.GenerateKeypair(rand.Reader)
 	serverKey, _ := noise.DH25519.GenerateKeypair(rand.Reader)
+	log.Printf("Client Keypair: %+v", clientKey)
+	log.Printf("Server Keypair: %+v", serverKey)
 
 	ncClient = noisesocket.ConnectionConfig{
 		IsClient:      true,

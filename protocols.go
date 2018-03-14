@@ -3,7 +3,7 @@ package noisesocket
 import (
 	"regexp"
 
-	"github.com/gedigi/noise"
+	"github.com/gedigi/noisesocket/noise"
 	"github.com/pkg/errors"
 )
 

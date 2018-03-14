@@ -17,7 +17,7 @@ import (
 
 	"bytes"
 
-	"github.com/gedigi/noise"
+	"github.com/gedigi/noisesocket/noise"
 	"github.com/pkg/errors"
 )
 
@@ -38,6 +38,8 @@ type ConnectionConfig struct {
 	DHFunc     byte
 	CipherFunc byte
 	HashFunc   byte
+
+	ServerHostname string
 }
 
 type ConnectionInfo struct {
