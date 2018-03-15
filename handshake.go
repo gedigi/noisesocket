@@ -1,126 +1,103 @@
 package noisesocket
 
 import (
-	"encoding/binary"
-
 	"crypto/rand"
+	"encoding/binary"
+	"encoding/json"
+	"log"
 
-	"bytes"
-	"io"
+	"github.com/golang/protobuf/proto"
 
-	"github.com/gedigi/noise"
+	"github.com/gedigi/noisesocket/noise"
 	"github.com/pkg/errors"
 )
 
-var negotiationData []byte
-var initString = []byte("NoiseSocketInit1")
-
-func init() {
-	negotiationData = make([]byte, 6)
-	binary.BigEndian.PutUint16(negotiationData, 1) //version
-}
+var appPrologue = []byte("NLS(revision1)")
 
 // ComposeInitiatorHandshakeMessage generates handshakeState and the first noise message.
-func ComposeInitiatorHandshakeMessage(s ConnectionConfig, rs []byte, payload []byte, ePrivate []byte) (negData, msg []byte, state *noise.HandshakeState, err error) {
+func ComposeInitiatorHandshakeMessage(s ConnectionConfig) (
+	negData, msg []byte,
+	state *noise.HandshakeState,
+	err error,
+) {
 
-	if len(rs) != 0 && len(rs) != dhs[s.DHFunc].DHLen() {
+	if len(s.PeerStatic) != 0 && len(s.PeerStatic) != dhs[s.DHFunc].DHLen() {
 		return nil, nil, nil, errors.New("only 32 byte curve25519 public keys are supported")
 	}
 
 	var pattern noise.HandshakePattern
+	var negotiationData = &NoiseLinkNegotiationDataRequest1{}
+	negotiationData.ServerName = s.ServerName
 
-	negotiationData[2] = s.DHFunc
-	negotiationData[3] = s.CipherFunc
-	negotiationData[4] = s.HashFunc
-
-	negData = make([]byte, 6)
-	copy(negData, negotiationData)
-
-	if len(rs) == 0 {
+	if len(s.PeerStatic) == 0 {
 		pattern = noise.HandshakeXX
-		negData[5] = NOISE_PATTERN_XX
+		negotiationData.InitialProtocol = "Noise_XX_22519_AESGCM_SHA256"
 	} else {
 		pattern = noise.HandshakeIK
-		negData[5] = NOISE_PATTERN_IK
+		negotiationData.InitialProtocol = "Noise_IK_22519_AESGCM_SHA256"
 	}
 
-	var random io.Reader
-	if len(ePrivate) == 0 {
-		random = rand.Reader
-	} else {
-		random = bytes.NewBuffer(ePrivate)
-	}
+	negData, _ = json.Marshal(negotiationData)
+	log.Printf("%s", negData)
 
-	prologue := make([]byte, 2, uint16Size+len(negData))
-	binary.BigEndian.PutUint16(prologue, uint16(len(negData)))
-	prologue = append(prologue, negData...)
-	prologue = append(initString, prologue...)
+	prologue := makePrologue([][]byte{negData}, "NoiseSocketInit1")
 	state, err = noise.NewHandshakeState(noise.Config{
 		StaticKeypair: s.StaticKeypair,
 		Initiator:     true,
 		Pattern:       pattern,
 		CipherSuite:   noise.NewCipherSuite(dhs[s.DHFunc], ciphers[s.CipherFunc], hashes[s.HashFunc]),
-		PeerStatic:    rs,
+		PeerStatic:    s.PeerStatic,
 		Prologue:      prologue,
-		Random:        random,
+		Random:        rand.Reader,
 	})
 
 	if err != nil {
 		return
 	}
 
-	msg, _, _, err = state.WriteMessage(msg, payload)
+	msg, _, _, err = state.WriteMessage(msg, s.Payload)
 
 	return
 }
 
 func ParseNegotiationData(data []byte, s ConnectionConfig) (state *noise.HandshakeState, err error) {
 
-	if len(data) != 6 {
-		return nil, errors.New("Invalid negotiation data length")
+	var (
+		ok                   bool
+		hs, dh, cipher, hash byte
+	)
+	dataParsed := &NoiseLinkNegotiationDataRequest1{}
+	log.Printf("%s", data)
+	if err = proto.Unmarshal(data, dataParsed); err != nil {
+		return nil, err
+	}
+	if _, ok = supportedProtocols[dataParsed.InitialProtocol]; !ok {
+		return nil, errors.New("unsupported protocol")
 	}
 
-	var ok bool
-	var dh noise.DHFunc
-	var cipher noise.CipherFunc
-	var hash noise.HashFunc
-	var pattern noise.HandshakePattern
+	hs, dh, cipher, hash, _, err = parseProtocolName(dataParsed.InitialProtocol)
 
-	version := binary.BigEndian.Uint16(data)
-	if version != 1 {
-		return nil, errors.New("unsupported version")
-	}
-
-	dhIndex := data[2]
-	if dh, ok = dhs[dhIndex]; !ok {
-		return nil, errors.New("unsupported DH")
-	}
-
-	cipherIndex := data[3]
-	if cipher, ok = ciphers[cipherIndex]; !ok {
-		return nil, errors.New("unsupported cipher")
-	}
-
-	hashIndex := data[4]
-	if hash, ok = hashes[hashIndex]; !ok {
-		return nil, errors.New("unsupported hash")
-	}
-
-	patternIndex := data[5]
-
-	if pattern, ok = patterns[patternIndex]; !ok {
-		return nil, errors.New("unsupported pattern")
-	}
-
-	prologue := make([]byte, 2, uint16Size+len(data))
-	binary.BigEndian.PutUint16(prologue, uint16(len(data)))
-	prologue = append(prologue, data...)
-	prologue = append(initString, prologue...)
+	prologue := makePrologue([][]byte{data}, "NoiseSocketInit1")
 	state, err = noise.NewHandshakeState(noise.Config{
 		StaticKeypair: s.StaticKeypair,
-		Pattern:       pattern,
-		CipherSuite:   noise.NewCipherSuite(dh, cipher, hash),
-		Prologue:      prologue,
+		Pattern:       patternByteObj[hs],
+		CipherSuite: noise.NewCipherSuite(
+			dhByteObj[dh],
+			cipherByteObj[cipher],
+			hashByteObj[hash],
+		),
+		Prologue: prologue,
 	})
+	return
+}
+
+func makePrologue(dataSlice [][]byte, initString string) (output []byte) {
+	output = append([]byte(initString), output...)
+	for _, data := range dataSlice {
+		dataLen := make([]byte, 2, uint16Size+len(data))
+		binary.BigEndian.PutUint16(dataLen, uint16(len(data)))
+		output = append(dataLen, data...)
+	}
+	output = append(output, appPrologue...)
 	return
 }

@@ -43,6 +43,9 @@ func Listen(laddr string, config *ConnectionConfig) (net.Listener, error) {
 func Dial(addr string, localaddr string, config *ConnectionConfig) (*Conn, error) {
 	dialer := new(net.Dialer)
 
+	if localaddr == "" {
+		localaddr = ":0"
+	}
 	localAddrArray := strings.Split(localaddr, ":")
 	if len(localAddrArray) != 2 {
 		return nil, errors.New("invalid source address")
@@ -64,6 +67,11 @@ func Dial(addr string, localaddr string, config *ConnectionConfig) (*Conn, error
 	}
 
 	config.IsClient = true
+	addr, _, err = net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	config.ServerName = addr
 	return &Conn{
 		conn:   rawConn,
 		config: *config,

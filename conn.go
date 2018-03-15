@@ -17,7 +17,7 @@ import (
 
 	"bytes"
 
-	"github.com/gedigi/noise"
+	"github.com/gedigi/noisesocket/noise"
 	"github.com/pkg/errors"
 )
 
@@ -35,6 +35,7 @@ type ConnectionConfig struct {
 	DHFunc         byte
 	CipherFunc     byte
 	HashFunc       byte
+	ServerName     string
 }
 
 type ConnectionInfo struct {
@@ -464,7 +465,7 @@ func (c *Conn) RunClientHandshake() error {
 		csIn, csOut  *noise.CipherState
 	)
 
-	if negData, msg, state, err = ComposeInitiatorHandshakeMessage(c.config, nil, nil, nil); err != nil {
+	if negData, msg, state, err = ComposeInitiatorHandshakeMessage(c.config); err != nil {
 		return err
 	}
 	if _, err = c.writePacket(negData); err != nil {
@@ -586,7 +587,7 @@ func (c *Conn) RunServerHandshake() error {
 		if err := c.readPacket(); err != nil {
 			return err
 		}
-		negotiationData = c.hand.Next(c.hand.Len())
+		negotiationData := c.hand.Next(c.hand.Len())
 		if len(negotiationData) != 0 {
 			return errors.New("Not supported")
 		}

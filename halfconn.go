@@ -8,7 +8,7 @@ import (
 
 	"fmt"
 
-	"github.com/gedigi/noise"
+	"github.com/gedigi/noisesocket/noise"
 	"github.com/pkg/errors"
 )
 
