@@ -10,6 +10,7 @@ import (
 
 var negotiationData []byte
 var appPrologue = []byte("NLS(revision1)")
+var fallback = true
 
 func init() {
 	negotiationData = make([]byte, 6)
@@ -23,27 +24,30 @@ func InitiatorHandshake(s ConnectionConfig, n NegotiationData) (
 	err error,
 ) {
 	var (
-		prologue []byte
-		pattern  noise.HandshakePattern
+		pattern, dh, hash, cipher byte
+		protoName                 string
 	)
 
 	if len(s.PeerStatic) != 0 && len(s.PeerStatic) != dhs[s.DHFunc].DHLen() {
 		return nil, nil, nil, errors.New("only 32 byte curve25519 public keys are supported")
 	}
+
+	nConfig := noise.Config{
+		StaticKeypair: s.StaticKeypair,
+		Initiator:     true,
+		PeerStatic:    s.PeerStatic,
+	}
 	if n.ResponseNegData == nil {
+
 		negotiationDataNLS := &NoiseLinkNegotiationDataRequest1{}
 		negotiationDataNLS.ServerName = s.ServerHostname
 		if len(s.PeerStatic) == 0 {
 			negotiationDataNLS.InitialProtocol = "Noise_XX_25519_AESGCM_SHA256"
-			negotiationDataNLS.SwitchProtocol = []string{"Noise_XX_25519_ChaChaPoly_SHA256"}
-			pattern = noise.HandshakeXX
+			negotiationDataNLS.RetryProtocol = []string{"Noise_XX_25519_ChaChaPoly_SHA256"}
 		} else {
 			negotiationDataNLS.InitialProtocol = "Noise_IK_25519_AESGCM_SHA256"
-			negotiationDataNLS.SwitchProtocol = []string{
-				"Noise_XX_25519_AESGCM_SHA256",
-				"Noise_XX_25519_ChaChaPoly_SHA256",
-			}
-			pattern = noise.HandshakeIK
+			negotiationDataNLS.SwitchProtocol = []string{"Noise_XXfallback_25519_AESGCM_SHA256"}
+			negotiationDataNLS.RetryProtocol = []string{"Noise_XX_25519_ChaChaPoly_SHA256"}
 		}
 
 		negData, err = proto.Marshal(negotiationDataNLS)
@@ -51,32 +55,35 @@ func InitiatorHandshake(s ConnectionConfig, n NegotiationData) (
 			return nil, nil, nil, errors.New("Invalid negotiation data")
 		}
 
-		prologue = makePrologue([][]byte{negData}, n.InitString)
+		protoName = negotiationDataNLS.InitialProtocol
+		nConfig.Prologue = makePrologue([][]byte{negData}, n.InitString)
 	} else {
-		pattern = noise.HandshakeXX
-		negData, err = proto.Marshal(n.ResponseNegData)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-
-		switch n.ResponseNegData.GetResponse().(type) {
+		switch n.ResponseNegData.Raw.GetResponse().(type) {
 		case *NoiseLinkNegotiationDataResponse1_Rejected:
 			return negData, nil, nil, nil
 		}
-		prologue = makePrologue([][]byte{
+		nConfig.Prologue = makePrologue([][]byte{
 			n.RemoteNegData,
 			n.RemoteNoiseMsg,
 			negData,
 		}, n.InitString)
+		protoName = n.ProtocolName
+		if n.RemoteEphemeral != nil {
+			nConfig.PeerEphemeral = n.RemoteEphemeral
+		}
 	}
-	state, err = noise.NewHandshakeState(noise.Config{
-		StaticKeypair: s.StaticKeypair,
-		Initiator:     true,
-		Pattern:       pattern,
-		CipherSuite:   noise.NewCipherSuite(noise.DH25519, noise.CipherAESGCM, noise.HashSHA256),
-		PeerStatic:    s.PeerStatic,
-		Prologue:      prologue,
-	})
+	pattern, dh, cipher, hash, _, err = parseProtocolName(protoName)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	nConfig.Pattern = patternByteObj[pattern]
+	nConfig.CipherSuite = noise.NewCipherSuite(
+		dhByteObj[dh],
+		cipherByteObj[cipher],
+		hashByteObj[hash],
+	)
+
+	state, err = noise.NewHandshakeState(nConfig)
 
 	if err != nil {
 		return nil, nil, nil, err
@@ -87,68 +94,108 @@ func InitiatorHandshake(s ConnectionConfig, n NegotiationData) (
 	return
 }
 
-func ParseNegotiationData(data []byte, s ConnectionConfig) (*NoiseLinkNegotiationDataResponse1, *noise.HandshakeState, error) {
+func ParseInitiatorData(s ConnectionConfig, negotiationData negoRequest, InitiatorNoiseMsg []byte) (
+	response negoResponse,
+	msg []byte,
+	state *noise.HandshakeState,
+	payload []byte,
+	err error,
+) {
+	var pattern, dh, cipher, hash byte
 
-	negotiationData := &NoiseLinkNegotiationDataRequest1{}
-	if err := proto.Unmarshal(data, negotiationData); err != nil {
-		return nil, nil, err
+	initialProtocol := negotiationData.Raw.GetInitialProtocol()
+	nConfig := noise.Config{
+		StaticKeypair: s.StaticKeypair,
 	}
 
-	// Accept
-	if _, ok := supportedProtocols[negotiationData.InitialProtocol]; ok {
+	if _, ok := supportedProtocols[initialProtocol]; ok {
+		// Initial Protocol is supported
+
 		var initString = []byte("NoiseSocketInit1")
-		pattern, dh, cipher, hash, err := parseProtocolName(negotiationData.InitialProtocol)
+		pattern, dh, cipher, hash, _, err = parseProtocolName(initialProtocol)
 		if err != nil {
-			return nil, nil, err
+			return negoResponse{}, nil, nil, nil, err
 		}
-
-		prologue := makePrologue([][]byte{data}, initString)
-
-		state, err := noise.NewHandshakeState(noise.Config{
-			StaticKeypair: s.StaticKeypair,
-			Pattern:       patternByteObj[pattern],
-			CipherSuite: noise.NewCipherSuite(
-				dhByteObj[dh],
-				cipherByteObj[cipher],
-				hashByteObj[hash],
-			),
-			Prologue: prologue,
-		})
+		nConfig.Pattern = patternByteObj[pattern]
+		nConfig.CipherSuite = noise.NewCipherSuite(
+			dhByteObj[dh],
+			cipherByteObj[cipher],
+			hashByteObj[hash],
+		)
+		nConfig.Prologue = makePrologue([][]byte{negotiationData.Encoded}, initString)
+		state, err = noise.NewHandshakeState(nConfig)
 		if err != nil {
-			return nil, nil, err
+			return negoResponse{}, nil, nil, nil, err
 		}
-		return nil, state, nil
-	}
-
-	negotiationDataNLS := &NoiseLinkNegotiationDataResponse1{}
-
-	// Switch
-	for _, pName := range negotiationData.SwitchProtocol {
-		if _, ok := supportedProtocols[pName]; ok {
-			negotiationDataNLS.Response = &NoiseLinkNegotiationDataResponse1_SwitchProtocol{
-				SwitchProtocol: pName,
+		payload, _, _, err = state.ReadMessage(nil, InitiatorNoiseMsg)
+		if err != nil {
+			// Switch to fallback if it can't decrypt
+			var negData []byte
+			switchProtocols := negotiationData.Raw.GetSwitchProtocol()
+			for _, pName := range switchProtocols {
+				if _, ok := supportedProtocols[pName]; ok {
+					r := &NoiseLinkNegotiationDataResponse1{
+						Response: &NoiseLinkNegotiationDataResponse1_SwitchProtocol{
+							SwitchProtocol: pName,
+						},
+					}
+					response, _ = newNegoResponse(r)
+					negData, msg, state, err = InitiatorHandshake(s, NegotiationData{
+						ProtocolName:    pName,
+						RemoteNoiseMsg:  InitiatorNoiseMsg,
+						RemoteNegData:   negotiationData.Encoded,
+						InitString:      []byte("NoiseSocketInit2"),
+						RemoteEphemeral: state.PeerEphemeral(),
+						ResponseNegData: &response,
+					})
+					break
+				}
 			}
-			goto returnFunc
-		}
-	}
-
-	// Retry
-	for _, pName := range negotiationData.RetryProtocol {
-		if _, ok := supportedProtocols[pName]; ok {
-			negotiationDataNLS.Response = &NoiseLinkNegotiationDataResponse1_RetryProtocol{
-				RetryProtocol: pName,
+			if negData == nil {
+				goto retryProtocol
 			}
-			goto returnFunc
+			msg, _, _, err = state.WriteMessage(msg, s.Payload)
+			return
+		}
+		return
+	}
+retryProtocol:
+	// Use retry protocol if not supported
+	var negData []byte
+
+	retryProtocols := negotiationData.Raw.GetRetryProtocol()
+	for _, pName := range retryProtocols {
+		if _, ok := supportedProtocols[pName]; ok {
+			r := &NoiseLinkNegotiationDataResponse1{
+				Response: &NoiseLinkNegotiationDataResponse1_RetryProtocol{
+					RetryProtocol: pName,
+				},
+			}
+			response, _ = newNegoResponse(r)
+			negData, msg, state, err = InitiatorHandshake(s, NegotiationData{
+				ProtocolName:    pName,
+				RemoteNoiseMsg:  InitiatorNoiseMsg,
+				RemoteNegData:   negotiationData.Encoded,
+				InitString:      []byte("NoiseSocketInit3"),
+				ResponseNegData: &response,
+			})
+			break
 		}
 	}
-
+	if negData == nil {
+		goto rejectProtocol
+	}
+	msg, _, _, err = state.WriteMessage(msg, s.Payload)
+	return
+rejectProtocol:
 	// Reject
-	negotiationDataNLS.Response = &NoiseLinkNegotiationDataResponse1_Rejected{
-		Rejected: true,
+	r := &NoiseLinkNegotiationDataResponse1{
+		Response: &NoiseLinkNegotiationDataResponse1_Rejected{
+			Rejected: true,
+		},
 	}
-
-returnFunc:
-	return negotiationDataNLS, nil, nil
+	response, _ = newNegoResponse(r)
+	return response, nil, nil, nil, nil
 }
 
 // NegotiationData holds information related to the negotiation_data field
@@ -157,8 +204,8 @@ type NegotiationData struct {
 	RemoteNoiseMsg  []byte
 	RemoteNegData   []byte
 	RemoteEphemeral []byte
-	ResponseNegData *NoiseLinkNegotiationDataResponse1
-	ProtocolnName   string
+	ResponseNegData *negoResponse
+	ProtocolName    string
 }
 
 func makePrologue(dataSlice [][]byte, initString []byte) []byte {
@@ -170,5 +217,6 @@ func makePrologue(dataSlice [][]byte, initString []byte) []byte {
 		output = append(dataLen, data...)
 	}
 	output = append(output, appPrologue...)
+	// log.Printf("%+v", output)
 	return output
 }

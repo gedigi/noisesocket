@@ -13,7 +13,6 @@ import (
 
 	"sync/atomic"
 
-	"crypto/rand"
 	"crypto/tls"
 
 	"encoding/json"
@@ -466,12 +465,13 @@ func (c *Conn) Handshake() error {
 func (c *Conn) RunClientHandshake() error {
 
 	var (
-		negData, msg []byte
-		state        *noise.HandshakeState
-		err          error
-		csIn, csOut  *noise.CipherState
+		negData, msg, payload []byte
+		state                 *noise.HandshakeState
+		err                   error
+		csIn, csOut           *noise.CipherState
 	)
 
+	// -- MSG1 START
 	if negData, msg, state, err = InitiatorHandshake(c.config, NegotiationData{
 		InitString: []byte("NoiseSocketInit1"),
 	}); err != nil {
@@ -483,6 +483,7 @@ func (c *Conn) RunClientHandshake() error {
 	if _, err = c.writePacket(msg); err != nil {
 		return err
 	}
+	// -- MSG1 END
 
 	//read negotiation data
 	if err := c.readPacket(); err != nil {
@@ -497,68 +498,28 @@ func (c *Conn) RunClientHandshake() error {
 	}
 
 	responderNoiseMsg := c.hand.Next(c.hand.Len())
-	// cannot reuse msg for read, need another buf
-	inBlock := c.in.newBlock()
-	inBlock.reserve(len(responderNoiseMsg))
-	payload, csIn, csOut, err := state.ReadMessage(inBlock.data, responderNoiseMsg)
-	if err != nil {
-		c.in.freeBlock(inBlock)
-		return err
-	}
-	if len(responderNegData) != 0 || err != nil {
-		responderParsedData := &NoiseLinkNegotiationDataResponse1{}
-		err = proto.Unmarshal(responderNegData, responderParsedData)
+
+	if responderNegData != nil {
+		var response negoResponse
+		protoRNegData, _ := newNegoRequest(responderNegData)
+		response, msg, state, payload, err = ParseInitiatorData(c.config, protoRNegData, responderNoiseMsg)
 		if err != nil {
 			return err
 		}
-		nConfig := noise.Config{}
-		var protoName string
-		switch responderParsedData.GetResponse().(type) {
-		case *NoiseLinkNegotiationDataResponse1_SwitchProtocol:
-			nConfig.EphemeralKeypair = state.LocalEphemeral()
-			protoName = responderParsedData.GetSwitchProtocol()
-		case *NoiseLinkNegotiationDataResponse1_RetryProtocol:
-			protoName = responderParsedData.GetRetryProtocol()
-		case *NoiseLinkNegotiationDataResponse1_Rejected:
-			return errors.New("Handshake rejected")
-		default:
-			return errors.New("Invalid response")
-		}
-
-		pattern, dh, cipher, hash, err := parseProtocolName(protoName)
-		if err != nil {
+		if _, err = c.writePacket(response.Encoded); err != nil {
 			return err
 		}
 
-		// original negotiation data
-		prologue := make([]byte, 2, uint16Size+len(negData))
-		binary.BigEndian.PutUint16(prologue, uint16(len(negData)))
-		prologue = append(prologue, negData...)
-
-		// original noise message
-		rNoiseMsgLen := make([]byte, 2, uint16Size+len(msg))
-		binary.BigEndian.PutUint16(rNoiseMsgLen, uint16(len(msg)))
-		prologue = append(prologue, rNoiseMsgLen...)
-		prologue = append(prologue, msg...)
-
-		// responder negotiation data
-		negDataLen := make([]byte, 2, uint16Size+len(responderNegData))
-		binary.BigEndian.PutUint16(negDataLen, uint16(len(responderNegData)))
-		prologue = append(prologue, negDataLen...)
-		prologue = append(prologue, responderNegData...)
-
-		prologue = append([]byte("NoiseSocketInit2"), prologue...)
-		prologue = append(prologue, appPrologue...)
-
-		nConfig.StaticKeypair = c.config.StaticKeypair
-		nConfig.Initiator = false
-		nConfig.Pattern = patternByteObj[pattern]
-		nConfig.CipherSuite = noise.NewCipherSuite(dhByteObj[dh], cipherByteObj[cipher], hashByteObj[hash])
-		nConfig.Prologue = prologue
-		nConfig.Random = rand.Reader
-
-		state, err = noise.NewHandshakeState(nConfig)
+		if _, err = c.writePacket(msg); err != nil {
+			return err
+		}
+	} else {
+		// cannot reuse msg for read, need another buf
+		inBlock := c.in.newBlock()
+		inBlock.reserve(len(responderNoiseMsg))
+		payload, csIn, csOut, err = state.ReadMessage(inBlock.data, responderNoiseMsg)
 		if err != nil {
+			c.in.freeBlock(inBlock)
 			return err
 		}
 
@@ -570,11 +531,11 @@ func (c *Conn) RunClientHandshake() error {
 		if _, err = c.writePacket(msg); err != nil {
 			return err
 		}
+		if state.PeerStatic() != nil {
+			c.processCallback(state.PeerStatic(), payload)
+			c.in.freeBlock(inBlock)
+		}
 
-	}
-	if state.PeerStatic() != nil {
-		c.processCallback(state.PeerStatic(), payload)
-		c.in.freeBlock(inBlock)
 	}
 
 	if csIn == nil && csOut == nil {
@@ -611,61 +572,38 @@ func (c *Conn) RunClientHandshake() error {
 
 func (c *Conn) RunServerHandshake() error {
 	var (
-		negData, msg []byte
-		state        *noise.HandshakeState
-		err          error
-		csIn, csOut  *noise.CipherState
+		msg         []byte
+		state       *noise.HandshakeState
+		err         error
+		csIn, csOut *noise.CipherState
 	)
 
+	// -- MSG1 START
+	// read negotiation data
 	if err = c.readPacket(); err != nil {
 		return err
 	}
 
 	InitiatorNegotiationData := c.hand.Next(c.hand.Len())
-	ReponderNegotiationData, state, err := ParseNegotiationData(InitiatorNegotiationData, c.config)
+	//read noise message
+	if err = c.readPacket(); err != nil {
+		return err
+	}
+	protoINegData, err := newNegoRequest(InitiatorNegotiationData)
+	if err != nil {
+		return errors.Errorf("Invalid negotiation data: %s", err)
+	}
+	InitiatorNoiseMsg := c.hand.Next(c.hand.Len())
+
+	ReponderNegotiationData, msg, state, payload, err := ParseInitiatorData(c.config, protoINegData, InitiatorNoiseMsg)
 
 	if err != nil {
 		return err
 	}
 
-	//read noise message
-	if err := c.readPacket(); err != nil {
-		return err
-	}
-
-	InitiatorNoiseMsg := c.hand.Next(c.hand.Len())
-
-	payload, _, _, err := state.ReadMessage(nil, InitiatorNoiseMsg)
-
-	if ReponderNegotiationData != nil || err != nil {
-		var initString, protoName string
-		switch ReponderNegotiationData.GetResponse().(type) {
-		case *NoiseLinkNegotiationDataResponse1_SwitchProtocol:
-			initString = "NoiseSocketInit2"
-			protoName = ReponderNegotiationData.GetSwitchProtocol()
-		case *NoiseLinkNegotiationDataResponse1_RetryProtocol:
-			initString = "NoiseSocketInit3"
-			protoName = ReponderNegotiationData.GetRetryProtocol()
-		case *NoiseLinkNegotiationDataResponse1_Rejected:
-			initString = ""
-		}
-		negDataStruct := NegotiationData{
-			RemoteNegData:   InitiatorNegotiationData,
-			RemoteNoiseMsg:  InitiatorNoiseMsg,
-			ResponseNegData: ReponderNegotiationData,
-			InitString:      []byte(initString),
-			ProtocolnName:   protoName,
-		}
-		if state.PeerEphemeral() != nil {
-			negDataStruct.RemoteEphemeral = state.PeerEphemeral()
-		}
-		negData, msg, state, err = InitiatorHandshake(c.config, negDataStruct)
-		if err != nil {
-			return err
-		}
-
+	if ReponderNegotiationData.Encoded != nil {
 		// Send negotiation Data back
-		_, err = c.writePacket(negData)
+		_, err = c.writePacket(ReponderNegotiationData.Encoded)
 		if err != nil {
 			return err
 		}
@@ -768,4 +706,47 @@ func (c *Conn) processCallback(publicKey []byte, payload []byte) error {
 
 	err := c.config.VerifyCallback(publicKey, payload)
 	return err
+}
+
+// protoMessage methods
+
+type negoRequest struct {
+	Encoded []byte
+	Raw     NoiseLinkNegotiationDataRequest1
+}
+type negoResponse struct {
+	Encoded []byte
+	Raw     NoiseLinkNegotiationDataResponse1
+}
+
+func newNegoRequest(T interface{}) (p negoRequest, err error) {
+	switch t := T.(type) {
+	case []byte:
+		c := T.([]byte)
+		p.Encoded = c
+		err = proto.Unmarshal(c, &p.Raw)
+	case NoiseLinkNegotiationDataRequest1:
+		c := T.(*NoiseLinkNegotiationDataRequest1)
+		p.Raw = *c
+		p.Encoded, err = proto.Marshal(c)
+	default:
+		err = errors.Errorf("Can't handle type %T", t)
+	}
+	return
+}
+
+func newNegoResponse(T interface{}) (p negoResponse, err error) {
+	switch t := T.(type) {
+	case []byte:
+		c := T.([]byte)
+		p.Encoded = c
+		err = proto.Unmarshal(c, &p.Raw)
+	case NoiseLinkNegotiationDataResponse1:
+		c := T.(*NoiseLinkNegotiationDataResponse1)
+		p.Raw = *c
+		p.Encoded, err = proto.Marshal(c)
+	default:
+		err = errors.Errorf("Can't handle type %T", t)
+	}
+	return
 }

@@ -35,10 +35,10 @@ var ciphers = map[byte]noise.CipherFunc{
 }
 
 var hashes = map[byte]noise.HashFunc{
-	NOISE_HASH_BLAKE2s: noise.HashBLAKE2s,
-	NOISE_HASH_BLAKE2b: noise.HashBLAKE2b,
-	NOISE_HASH_SHA256:  noise.HashSHA256,
-	NOISE_HASH_SHA512:  noise.HashSHA512,
+	// NOISE_HASH_BLAKE2s: noise.HashBLAKE2s,
+	// NOISE_HASH_BLAKE2b: noise.HashBLAKE2b,
+	NOISE_HASH_SHA256: noise.HashSHA256,
+	// NOISE_HASH_SHA512:  noise.HashSHA512,
 }
 
 var patterns = map[byte]noise.HandshakePattern{
@@ -97,35 +97,41 @@ var hashByteObj = map[byte]noise.HashFunc{
 	NOISE_HASH_SHA512: noise.HashSHA512,
 }
 
-func parseProtocolName(protoName string) (byte, byte, byte, byte, error) {
-	var hs, dh, cipher, hash byte
-	var err error
+func parseProtocolName(protoName string) (
+	hs byte,
+	dh byte,
+	cipher byte,
+	hash byte,
+	fallback bool,
+	err error,
+) {
 	var ok bool
 	// fallback support
-	// regEx := regexp.MustCompile(`Noise_(\w{2})(fallback)*_(\w+)_(\w+)_(\w+)`)
-	regEx := regexp.MustCompile(`Noise_(\w{2})_(\w+)_(\w+)_(\w+)`)
+	regEx := regexp.MustCompile(`Noise_(\w{2})(fallback)*_(\w+)_(\w+)_(\w+)`)
+	// regEx := regexp.MustCompile(`Noise_(\w{2})_(\w+)_(\w+)_(\w+)`)
 	results := regEx.FindStringSubmatch(protoName)
-	if len(results) == 5 {
+	if len(results) == 6 {
 		if hs, ok = patternStrByte[results[1]]; ok == false {
-			err = errors.New("Invalid handshake pattern")
-			goto exit
+			err = errors.New("Unsupported handshake pattern")
+			return
 		}
-		if dh, ok = dhStrByte[results[2]]; ok == false {
-			err = errors.New("Invalid DH function")
-			goto exit
+		if results[2] != "" {
+			fallback = true
 		}
-		if cipher, ok = cipherStrByte[results[3]]; ok == false {
-			err = errors.New("Invalid cipher function")
-			goto exit
+		if dh, ok = dhStrByte[results[3]]; ok == false {
+			err = errors.New("Unsupported DH function")
+			return
 		}
-		if hash, ok = hashStrByte[results[4]]; ok == false {
-			err = errors.New("Invalid hash function")
-			goto exit
+		if cipher, ok = cipherStrByte[results[4]]; ok == false {
+			err = errors.New("Unsupported cipher function")
+			return
 		}
-		err = nil
+		if hash, ok = hashStrByte[results[5]]; ok == false {
+			err = errors.New("Unsupported hash function")
+			return
+		}
 	} else {
 		err = errors.New("Invalid protocol name")
 	}
-exit:
-	return hs, dh, cipher, hash, err
+	return
 }
