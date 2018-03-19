@@ -7,10 +7,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang/protobuf/proto"
+
 	"math"
 
 	"sync/atomic"
 
+	"crypto/rand"
 	"crypto/tls"
 
 	"encoding/json"
@@ -481,6 +484,35 @@ func (c *Conn) RunClientHandshake() error {
 	}
 
 	negotiationData := c.hand.Next(c.hand.Len())
+	protoNegotiationData := &NoiseLinkNegotiationDataResponse1{}
+	proto.Unmarshal(negotiationData, protoNegotiationData)
+
+	// if len(negotiationData) != 0 || len(msg) == 0 {
+	if len(negotiationData) != 0 {
+		switch protoNegotiationData.Response.(type) {
+		case *NoiseLinkNegotiationDataResponse1_Rejected:
+			return errors.New("Server rejected connection")
+		case *NoiseLinkNegotiationDataResponse1_SwitchProtocol:
+			r := protoNegotiationData.Response.(*NoiseLinkNegotiationDataResponse1_SwitchProtocol)
+			prologue := makePrologue([][]byte{
+				negData,
+				msg,
+				negotiationData,
+			}, []byte("NoiseSocketInit2"))
+			pattern, dh, cipher, hash, _ := parseProtocolName(r.SwitchProtocol)
+			state, _ = noise.NewHandshakeState(noise.Config{
+				StaticKeypair:    state.LocalStatic(),
+				EphemeralKeypair: state.LocalEphemeral(),
+				Pattern:          patternByteObj[pattern],
+				CipherSuite: noise.NewCipherSuite(
+					dhByteObj[dh],
+					cipherByteObj[cipher],
+					hashByteObj[hash],
+				),
+				Prologue: prologue,
+			})
+		}
+	}
 
 	//read noise message
 	if err := c.readPacket(); err != nil {
@@ -488,10 +520,6 @@ func (c *Conn) RunClientHandshake() error {
 	}
 
 	msg = c.hand.Next(c.hand.Len())
-
-	if len(negotiationData) != 0 || len(msg) == 0 {
-		return errors.New("Server returned error")
-	}
 
 	// cannot reuse msg for read, need another buf
 	inBlock := c.in.newBlock()
@@ -544,7 +572,13 @@ func (c *Conn) RunServerHandshake() error {
 		return err
 	}
 
-	hs, err := ParseNegotiationData(c.hand.Next(c.hand.Len()), c.config)
+	negData := c.hand.Next(c.hand.Len())
+	protoNegData := &NoiseLinkNegotiationDataRequest1{}
+	err := proto.Unmarshal(negData, protoNegData)
+	if err != nil {
+		return err
+	}
+	hs, err := ParseNegotiationData(negData, c.config)
 
 	if err != nil {
 		return err
@@ -553,15 +587,47 @@ func (c *Conn) RunServerHandshake() error {
 	if err := c.readPacket(); err != nil {
 		return err
 	}
-	payload, _, _, err := hs.ReadMessage(nil, c.hand.Next(c.hand.Len()))
+	noiseMsg := c.hand.Next(c.hand.Len())
+	payload, _, _, err := hs.ReadMessage(nil, noiseMsg)
 
+	protoResponse := &NoiseLinkNegotiationDataResponse1{}
+	var response []byte
 	if err != nil {
-		return err
-	}
-
-	err = c.processCallback(hs.PeerStatic(), payload)
-	if err != nil {
-		return err
+		// Switch
+		for _, v := range protoNegData.GetSwitchProtocol() {
+			if _, ok := supportedProtocols[v]; ok {
+				protoResponse.Response = &NoiseLinkNegotiationDataResponse1_SwitchProtocol{
+					SwitchProtocol: v,
+				}
+				response, _ = proto.Marshal(protoResponse)
+				prologue := makePrologue([][]byte{
+					negData,
+					noiseMsg,
+					response,
+				}, []byte("NoiseSocketInit2"))
+				pattern, dh, cipher, hash, _ := parseProtocolName(v)
+				hs, err = noise.NewHandshakeState(noise.Config{
+					StaticKeypair: hs.LocalStatic(),
+					Initiator:     true,
+					Pattern:       patternByteObj[pattern],
+					CipherSuite: noise.NewCipherSuite(
+						dhByteObj[dh],
+						cipherByteObj[cipher],
+						hashByteObj[hash],
+					),
+					Prologue:      prologue,
+					Random:        rand.Reader,
+					PeerEphemeral: hs.PeerEphemeral(),
+				})
+			} else {
+				return errors.New("Connections rejected")
+			}
+		}
+	} else {
+		err = c.processCallback(hs.PeerStatic(), payload)
+		if err != nil {
+			return err
+		}
 	}
 
 	b := c.out.newBlock()
@@ -570,8 +636,7 @@ func (c *Conn) RunServerHandshake() error {
 		c.out.freeBlock(b)
 		return err
 	}
-	//empty negotiation data
-	_, err = c.writePacket(nil)
+	_, err = c.writePacket(response)
 	if err != nil {
 		c.out.freeBlock(b)
 		return err

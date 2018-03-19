@@ -21,8 +21,9 @@ const (
 	NOISE_HASH_SHA256  = 3
 	NOISE_HASH_SHA512  = 4
 
-	NOISE_PATTERN_XX = 9
-	NOISE_PATTERN_IK = 14
+	NOISE_PATTERN_XX          = 9
+	NOISE_PATTERN_IK          = 14
+	NOISE_PATTERN_XX_FALLBACK = 16
 )
 
 var dhs = map[byte]noise.DHFunc{
@@ -42,8 +43,9 @@ var hashes = map[byte]noise.HashFunc{
 }
 
 var patterns = map[byte]noise.HandshakePattern{
-	NOISE_PATTERN_XX: noise.HandshakeXX,
-	NOISE_PATTERN_IK: noise.HandshakeIK,
+	NOISE_PATTERN_XX:          noise.HandshakeXX,
+	NOISE_PATTERN_IK:          noise.HandshakeIK,
+	NOISE_PATTERN_XX_FALLBACK: noise.HandshakeXXfallback,
 }
 
 var supportedProtocols = map[string]byte{
@@ -57,13 +59,15 @@ var supportedProtocols = map[string]byte{
 
 // Handshake Patterns
 var patternStrByte = map[string]byte{
-	"XX": NOISE_PATTERN_XX,
-	"IK": NOISE_PATTERN_IK,
+	"XX":         NOISE_PATTERN_XX,
+	"IK":         NOISE_PATTERN_IK,
+	"XXfallback": NOISE_PATTERN_XX_FALLBACK,
 }
 
 var patternByteObj = map[byte]noise.HandshakePattern{
-	NOISE_PATTERN_XX: noise.HandshakeXX,
-	NOISE_PATTERN_IK: noise.HandshakeIK,
+	NOISE_PATTERN_XX:          noise.HandshakeXX,
+	NOISE_PATTERN_IK:          noise.HandshakeIK,
+	NOISE_PATTERN_XX_FALLBACK: noise.HandshakeXXfallback,
 }
 
 // DH Funcs
@@ -102,29 +106,25 @@ func parseProtocolName(protoName string) (
 	dh byte,
 	cipher byte,
 	hash byte,
-	fallback bool,
 	err error,
 ) {
 	var ok bool
-	regEx := regexp.MustCompile(`Noise_(\w{2})(fallback)*_(\w+)_(\w+)_(\w+)`)
+	regEx := regexp.MustCompile(`Noise_(\w+)_(\w+)_(\w+)_(\w+)`)
 	results := regEx.FindStringSubmatch(protoName)
-	if len(results) == 6 {
+	if len(results) == 5 {
 		if hs, ok = patternStrByte[results[1]]; ok == false {
 			err = errors.New("Unsupported handshake pattern")
 			return
 		}
-		if results[2] != "" {
-			fallback = true
-		}
-		if dh, ok = dhStrByte[results[3]]; ok == false {
+		if dh, ok = dhStrByte[results[2]]; ok == false {
 			err = errors.New("Unsupported DH function")
 			return
 		}
-		if cipher, ok = cipherStrByte[results[4]]; ok == false {
+		if cipher, ok = cipherStrByte[results[3]]; ok == false {
 			err = errors.New("Unsupported cipher function")
 			return
 		}
-		if hash, ok = hashStrByte[results[5]]; ok == false {
+		if hash, ok = hashStrByte[results[4]]; ok == false {
 			err = errors.New("Unsupported hash function")
 			return
 		}

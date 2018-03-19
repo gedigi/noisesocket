@@ -3,8 +3,6 @@ package noisesocket
 import (
 	"crypto/rand"
 	"encoding/binary"
-	"encoding/json"
-	"log"
 
 	"github.com/golang/protobuf/proto"
 
@@ -25,30 +23,36 @@ func ComposeInitiatorHandshakeMessage(s ConnectionConfig) (
 		return nil, nil, nil, errors.New("only 32 byte curve25519 public keys are supported")
 	}
 
-	var pattern noise.HandshakePattern
-	var negotiationData = &NoiseLinkNegotiationDataRequest1{}
+	negotiationData := new(NoiseLinkNegotiationDataRequest1)
 	negotiationData.ServerName = s.ServerName
 
 	if len(s.PeerStatic) == 0 {
-		pattern = noise.HandshakeXX
-		negotiationData.InitialProtocol = "Noise_XX_22519_AESGCM_SHA256"
+		negotiationData.InitialProtocol = "Noise_XX_25519_AESGCM_SHA256"
 	} else {
-		pattern = noise.HandshakeIK
-		negotiationData.InitialProtocol = "Noise_IK_22519_AESGCM_SHA256"
+		negotiationData.InitialProtocol = "Noise_IK_25519_AESGCM_SHA256"
+		negotiationData.SwitchProtocol = []string{"Noise_XXfallback_25519_AESGCM_SHA256"}
 	}
 
-	negData, _ = json.Marshal(negotiationData)
-	log.Printf("%s", negData)
+	negData, _ = proto.Marshal(negotiationData)
 
-	prologue := makePrologue([][]byte{negData}, "NoiseSocketInit1")
+	hs, dh, cipher, hash, err := parseProtocolName(negotiationData.InitialProtocol)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	prologue := makePrologue([][]byte{negData}, []byte("NoiseSocketInit1"))
 	state, err = noise.NewHandshakeState(noise.Config{
 		StaticKeypair: s.StaticKeypair,
 		Initiator:     true,
-		Pattern:       pattern,
-		CipherSuite:   noise.NewCipherSuite(dhs[s.DHFunc], ciphers[s.CipherFunc], hashes[s.HashFunc]),
-		PeerStatic:    s.PeerStatic,
-		Prologue:      prologue,
-		Random:        rand.Reader,
+		Pattern:       patternByteObj[hs],
+		CipherSuite: noise.NewCipherSuite(
+			dhByteObj[dh],
+			cipherByteObj[cipher],
+			hashByteObj[hash],
+		),
+		PeerStatic: s.PeerStatic,
+		Prologue:   prologue,
+		Random:     rand.Reader,
 	})
 
 	if err != nil {
@@ -66,18 +70,18 @@ func ParseNegotiationData(data []byte, s ConnectionConfig) (state *noise.Handsha
 		ok                   bool
 		hs, dh, cipher, hash byte
 	)
-	dataParsed := &NoiseLinkNegotiationDataRequest1{}
-	log.Printf("%s", data)
-	if err = proto.Unmarshal(data, dataParsed); err != nil {
-		return nil, err
+	dataParsed := new(NoiseLinkNegotiationDataRequest1)
+	err = proto.Unmarshal(data, dataParsed)
+	if err != nil {
+		panic(err)
 	}
 	if _, ok = supportedProtocols[dataParsed.InitialProtocol]; !ok {
 		return nil, errors.New("unsupported protocol")
 	}
 
-	hs, dh, cipher, hash, _, err = parseProtocolName(dataParsed.InitialProtocol)
+	hs, dh, cipher, hash, err = parseProtocolName(dataParsed.InitialProtocol)
 
-	prologue := makePrologue([][]byte{data}, "NoiseSocketInit1")
+	prologue := makePrologue([][]byte{data}, []byte("NoiseSocketInit1"))
 	state, err = noise.NewHandshakeState(noise.Config{
 		StaticKeypair: s.StaticKeypair,
 		Pattern:       patternByteObj[hs],
@@ -91,13 +95,35 @@ func ParseNegotiationData(data []byte, s ConnectionConfig) (state *noise.Handsha
 	return
 }
 
-func makePrologue(dataSlice [][]byte, initString string) (output []byte) {
-	output = append([]byte(initString), output...)
+func makePrologue(dataSlice [][]byte, initString []byte) (output []byte) {
+	output = append(initString, output...)
 	for _, data := range dataSlice {
 		dataLen := make([]byte, 2, uint16Size+len(data))
 		binary.BigEndian.PutUint16(dataLen, uint16(len(data)))
-		output = append(dataLen, data...)
+		output = append(output, dataLen...)
+		output = append(output, data...)
 	}
 	output = append(output, appPrologue...)
+	return
+}
+
+// NegotiationData struct
+type negotiationData struct {
+	Encoded []byte
+	Raw     proto.Message
+}
+
+func newNegotiationData(t interface{}) (n negotiationData, err error) {
+	// n = &negotiationData{}
+	switch tType := t.(type) {
+	case []byte:
+		n.Encoded = t.([]byte)
+		err = proto.Unmarshal(n.Encoded, n.Raw)
+	case proto.Message:
+		n.Raw = t.(proto.Message)
+		n.Encoded, err = proto.Marshal(n.Raw)
+	default:
+		err = errors.Errorf("Can't handle type %T", tType)
+	}
 	return
 }

@@ -503,6 +503,11 @@ func (s *HandshakeState) LocalEphemeral() DHKey {
 	return s.e
 }
 
+// LocalStatic returns the local static key pair
+func (s *HandshakeState) LocalStatic() DHKey {
+	return s.s
+}
+
 // MessageIndex returns the current handshake message id
 func (s *HandshakeState) MessageIndex() int {
 	return s.msgIdx
