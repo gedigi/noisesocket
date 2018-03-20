@@ -510,6 +510,25 @@ func (c *Conn) RunClientHandshake() error {
 				),
 				Prologue: prologue,
 			})
+		case *NoiseLinkNegotiationDataResponse1_RetryProtocol:
+			r := protoNegotiationData.Response.(*NoiseLinkNegotiationDataResponse1_RetryProtocol)
+			prologue := makePrologue([][]byte{
+				negData,
+				msg,
+				negotiationData,
+			}, []byte("NoiseSocketInit3"))
+			pattern, dh, cipher, hash, _ := parseProtocolName(r.RetryProtocol)
+			state, _ = noise.NewHandshakeState(noise.Config{
+				StaticKeypair: state.LocalStatic(),
+				Pattern:       patternByteObj[pattern],
+				CipherSuite: noise.NewCipherSuite(
+					dhByteObj[dh],
+					cipherByteObj[cipher],
+					hashByteObj[hash],
+				),
+				Prologue: prologue,
+			})
+
 		}
 	}
 
@@ -597,8 +616,7 @@ func (c *Conn) RunServerHandshake() error {
 				response, hs, err = makeResponse(v, "switch", [][]byte{
 					negData,
 					noiseMsg,
-					response,
-				}, hs.PeerEphemeral())
+				}, hs.PeerEphemeral(), hs.LocalStatic())
 			}
 		}
 		if response == nil {
@@ -608,14 +626,13 @@ func (c *Conn) RunServerHandshake() error {
 					response, hs, err = makeResponse(v, "retry", [][]byte{
 						negData,
 						noiseMsg,
-						response,
-					}, nil)
+					}, nil, hs.LocalStatic())
 				}
 			}
 		}
 		if response == nil {
 			// Reject
-			response, hs, err = makeResponse("", "reject", nil, nil)
+			response, hs, err = makeResponse("", "reject", nil, nil, noise.DHKey{})
 		}
 	} else {
 		err = c.processCallback(hs.PeerStatic(), payload)

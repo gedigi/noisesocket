@@ -3,6 +3,7 @@ package noisesocket
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"log"
 
 	"github.com/golang/protobuf/proto"
 
@@ -96,6 +97,7 @@ func ParseNegotiationData(data []byte, s ConnectionConfig) (state *noise.Handsha
 }
 
 func makePrologue(dataSlice [][]byte, initString []byte) (output []byte) {
+	log.Printf("dataslice %s\n%v", dataSlice, dataSlice)
 	output = append(initString, output...)
 	for _, data := range dataSlice {
 		dataLen := make([]byte, 2, uint16Size+len(data))
@@ -104,6 +106,7 @@ func makePrologue(dataSlice [][]byte, initString []byte) (output []byte) {
 		output = append(output, data...)
 	}
 	output = append(output, appPrologue...)
+	log.Printf("output %s\n%v", output, output)
 	return
 }
 
@@ -128,7 +131,7 @@ func newNegotiationData(t interface{}) (n negotiationData, err error) {
 	return
 }
 
-func makeResponse(protoName string, responseType string, prologueData [][]byte, peerEphemeral []byte) (response []byte, hs *noise.HandshakeState, err error) {
+func makeResponse(protoName string, responseType string, prologueData [][]byte, peerEphemeral []byte, localStatic noise.DHKey) (response []byte, hs *noise.HandshakeState, err error) {
 	var initString []byte
 	protoResponse := &NoiseLinkNegotiationDataResponse1{}
 	switch responseType {
@@ -140,21 +143,21 @@ func makeResponse(protoName string, responseType string, prologueData [][]byte, 
 		protoResponse.Response = &NoiseLinkNegotiationDataResponse1_SwitchProtocol{
 			SwitchProtocol: protoName,
 		}
-		initString = []byte("NoiseSocketInit3")
+		initString = []byte("NoiseSocketInit2")
 	case "retry":
 		protoResponse.Response = &NoiseLinkNegotiationDataResponse1_RetryProtocol{
 			RetryProtocol: protoName,
 		}
-		initString = []byte("NoiseSocketInit2")
+		initString = []byte("NoiseSocketInit3")
 	default:
 		return nil, nil, errors.New("Invalid request data")
 	}
 	if initString != nil {
 		response, _ = proto.Marshal(protoResponse)
-		prologue := makePrologue(prologueData, initString)
+		prologue := makePrologue(append(prologueData, [][]byte{response}...), initString)
 		pattern, dh, cipher, hash, _ := parseProtocolName(protoName)
 		hs, err = noise.NewHandshakeState(noise.Config{
-			StaticKeypair: hs.LocalStatic(),
+			StaticKeypair: localStatic,
 			Initiator:     true,
 			Pattern:       patternByteObj[pattern],
 			CipherSuite: noise.NewCipherSuite(
