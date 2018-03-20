@@ -16,7 +16,7 @@ It has these top-level messages:
 	NoiseZeroLinkHandshakePayloadRequest1
 	NoiseZeroLinkHandshakePayloadResponse1
 */
-package NoiseLink_2
+package noisesocket
 
 import proto "github.com/golang/protobuf/proto"
 import fmt "fmt"

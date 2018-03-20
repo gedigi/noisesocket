@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+message NoiseLinkNegotiationDataRequest1 {
+  string server_name = 1;
+  string initial_protocol = 2;
+  repeated string switch_protocol = 3;
+  repeated string retry_protocol = 4;
+  NoiseLinkEarlyHandshakePayload early_payload = 6;
+}
+
+message NoiseLinkEarlyHandshakePayload {
+  repeated string evidence_request_type = 1;
+}
+
+message NoiseLinkNegotiationDataResponse1 {
+  oneof response {
+    string switch_protocol = 3;
+    string retry_protocol = 4;
+    bool rejected = 5;
+  }
+}
+
+message NoiseLinkHandshakePayloadResponse1 {
+  repeated string evidence_request_type = 1;
+  repeated string evidence_blob_type = 2;
+  repeated bytes evidence_blob = 3;
+}
+
+message NoiseLinkHandshakePayloadRequest2 {
+  repeated string evidence_blob_type = 2;
+  repeated bytes evidence_blob = 3;
+}
+
+message NoiseZeroLinkHandshakePayloadRequest1 {
+  repeated string evidence_request_type = 1;
+  repeated string evidence_blob_type = 2;
+  repeated bytes evidence_blob = 3;
+}
+
+message NoiseZeroLinkHandshakePayloadResponse1 {
+  repeated string evidence_blob_type = 2;
+  repeated bytes evidence_blob = 3;
+}
+

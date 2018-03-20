@@ -10,7 +10,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-var appPrologue = []byte("NLS(revision1)")
+var appPrologue = []byte("NLS(revision2)")
 
 // ComposeInitiatorHandshakeMessage generates handshakeState and the first noise message.
 func ComposeInitiatorHandshakeMessage(s ConnectionConfig) (
