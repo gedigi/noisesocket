@@ -48,13 +48,19 @@ var patterns = map[byte]noise.HandshakePattern{
 	NOISE_PATTERN_XX_FALLBACK: noise.HandshakeXXfallback,
 }
 
-var supportedProtocols = map[string]byte{
-	"Noise_IK_25519_AESGCM_SHA256":             0,
-	"Noise_IK_25519_ChaChaPoly_SHA256":         1,
-	"Noise_XX_25519_AESGCM_SHA256":             2,
-	"Noise_XX_25519_ChaChaPoly_SHA256":         3,
-	"Noise_XXfallback_25519_AESGCM_SHA256":     4,
-	"Noise_XXfallback_25519_ChaChaPoly_SHA256": 5,
+var supportedInitProtocols = map[string]byte{
+	"Noise_IK_25519_AESGCM_SHA256":     0,
+	"Noise_IK_25519_ChaChaPoly_SHA256": 1,
+	"Noise_XX_25519_AESGCM_SHA256":     2,
+	"Noise_XX_25519_ChaChaPoly_SHA256": 3,
+}
+var supportedRetryProtocols = map[string]byte{
+	"Noise_XX_25519_AESGCM_SHA256":     0,
+	"Noise_XX_25519_ChaChaPoly_SHA256": 1,
+}
+var supportedSwitchProtocols = map[string]byte{
+	"Noise_XXfallback_25519_AESGCM_SHA256":     0,
+	"Noise_XXfallback_25519_ChaChaPoly_SHA256": 1,
 }
 
 // Handshake Patterns

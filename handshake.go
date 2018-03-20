@@ -75,8 +75,8 @@ func ParseNegotiationData(data []byte, s ConnectionConfig) (state *noise.Handsha
 	if err != nil {
 		panic(err)
 	}
-	if _, ok = supportedProtocols[dataParsed.InitialProtocol]; !ok {
-		return nil, errors.New("unsupported protocol")
+	if _, ok = supportedInitialProtocols[dataParsed.InitialProtocol]; !ok {
+		return nil, errors.New("unsupported initial protocol")
 	}
 
 	hs, dh, cipher, hash, err = parseProtocolName(dataParsed.InitialProtocol)

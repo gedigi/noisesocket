@@ -595,7 +595,7 @@ func (c *Conn) RunServerHandshake() error {
 	if err != nil {
 		// Switch
 		for _, v := range protoNegData.GetSwitchProtocol() {
-			if _, ok := supportedProtocols[v]; ok {
+			if _, ok := supportedSwitchProtocols[v]; ok {
 				protoResponse.Response = &NoiseLinkNegotiationDataResponse1_SwitchProtocol{
 					SwitchProtocol: v,
 				}
