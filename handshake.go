@@ -127,3 +127,45 @@ func newNegotiationData(t interface{}) (n negotiationData, err error) {
 	}
 	return
 }
+
+func makeResponse(protoName string, responseType string, prologueData [][]byte, peerEphemeral []byte) (response []byte, hs *noise.HandshakeState, err error) {
+	var initString []byte
+	protoResponse := &NoiseLinkNegotiationDataResponse1{}
+	switch responseType {
+	case "reject":
+		protoResponse.Response = &NoiseLinkNegotiationDataResponse1_Rejected{
+			Rejected: true,
+		}
+	case "switch":
+		protoResponse.Response = &NoiseLinkNegotiationDataResponse1_SwitchProtocol{
+			SwitchProtocol: protoName,
+		}
+		initString = []byte("NoiseSocketInit3")
+	case "retry":
+		protoResponse.Response = &NoiseLinkNegotiationDataResponse1_RetryProtocol{
+			RetryProtocol: protoName,
+		}
+		initString = []byte("NoiseSocketInit2")
+	default:
+		return nil, nil, errors.New("Invalid request data")
+	}
+	if initString != nil {
+		response, _ = proto.Marshal(protoResponse)
+		prologue := makePrologue(prologueData, initString)
+		pattern, dh, cipher, hash, _ := parseProtocolName(protoName)
+		hs, err = noise.NewHandshakeState(noise.Config{
+			StaticKeypair: hs.LocalStatic(),
+			Initiator:     true,
+			Pattern:       patternByteObj[pattern],
+			CipherSuite: noise.NewCipherSuite(
+				dhByteObj[dh],
+				cipherByteObj[cipher],
+				hashByteObj[hash],
+			),
+			Prologue:      prologue,
+			Random:        rand.Reader,
+			PeerEphemeral: peerEphemeral,
+		})
+	}
+	return
+}

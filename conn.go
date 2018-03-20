@@ -13,7 +13,6 @@ import (
 
 	"sync/atomic"
 
-	"crypto/rand"
 	"crypto/tls"
 
 	"encoding/json"
@@ -590,38 +589,33 @@ func (c *Conn) RunServerHandshake() error {
 	noiseMsg := c.hand.Next(c.hand.Len())
 	payload, _, _, err := hs.ReadMessage(nil, noiseMsg)
 
-	protoResponse := &NoiseLinkNegotiationDataResponse1{}
 	var response []byte
 	if err != nil {
 		// Switch
 		for _, v := range protoNegData.GetSwitchProtocol() {
 			if _, ok := supportedSwitchProtocols[v]; ok {
-				protoResponse.Response = &NoiseLinkNegotiationDataResponse1_SwitchProtocol{
-					SwitchProtocol: v,
-				}
-				response, _ = proto.Marshal(protoResponse)
-				prologue := makePrologue([][]byte{
+				response, hs, err = makeResponse(v, "switch", [][]byte{
 					negData,
 					noiseMsg,
 					response,
-				}, []byte("NoiseSocketInit2"))
-				pattern, dh, cipher, hash, _ := parseProtocolName(v)
-				hs, err = noise.NewHandshakeState(noise.Config{
-					StaticKeypair: hs.LocalStatic(),
-					Initiator:     true,
-					Pattern:       patternByteObj[pattern],
-					CipherSuite: noise.NewCipherSuite(
-						dhByteObj[dh],
-						cipherByteObj[cipher],
-						hashByteObj[hash],
-					),
-					Prologue:      prologue,
-					Random:        rand.Reader,
-					PeerEphemeral: hs.PeerEphemeral(),
-				})
-			} else {
-				return errors.New("Connections rejected")
+				}, hs.PeerEphemeral())
 			}
+		}
+		if response == nil {
+			// Retry
+			for _, v := range protoNegData.GetRetryProtocol() {
+				if _, ok := supportedRetryProtocols[v]; ok {
+					response, hs, err = makeResponse(v, "retry", [][]byte{
+						negData,
+						noiseMsg,
+						response,
+					}, nil)
+				}
+			}
+		}
+		if response == nil {
+			// Reject
+			response, hs, err = makeResponse("", "reject", nil, nil)
 		}
 	} else {
 		err = c.processCallback(hs.PeerStatic(), payload)
