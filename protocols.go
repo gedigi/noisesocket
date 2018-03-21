@@ -26,6 +26,12 @@ const (
 	NOISE_PATTERN_XX_FALLBACK = 16
 )
 
+const (
+	RESPONSE_RETRY  = 1
+	RESPONSE_SWITCH = 2
+	RESPONSE_REJECT = 3
+)
+
 var dhs = map[byte]noise.DHFunc{
 	NOISE_DH_CURVE25519: noise.DH25519,
 }

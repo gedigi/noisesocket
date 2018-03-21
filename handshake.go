@@ -3,7 +3,6 @@ package noisesocket
 import (
 	"crypto/rand"
 	"encoding/binary"
-	"log"
 
 	"github.com/golang/protobuf/proto"
 
@@ -20,26 +19,43 @@ func ComposeInitiatorHandshakeMessage(s ConnectionConfig) (
 	err error,
 ) {
 
-	if len(s.PeerStatic) != 0 && len(s.PeerStatic) != dhs[s.DHFunc].DHLen() {
+	if len(s.PeerStatic) != 0 && len(s.PeerStatic) != dhs[NOISE_DH_CURVE25519].DHLen() {
 		return nil, nil, nil, errors.New("only 32 byte curve25519 public keys are supported")
 	}
 
 	negotiationData := new(NoiseLinkNegotiationDataRequest1)
 	negotiationData.ServerName = s.ServerName
 
-	if len(s.PeerStatic) == 0 {
-		negotiationData.InitialProtocol = "Noise_XX_25519_AESGCM_SHA256"
-	} else {
-		negotiationData.InitialProtocol = "Noise_IK_25519_AESGCM_SHA256"
-		negotiationData.SwitchProtocol = []string{"Noise_XXfallback_25519_AESGCM_SHA256"}
+	negotiationData.InitialProtocol,
+		negotiationData.RetryProtocol,
+		negotiationData.SwitchProtocol,
+		err = func() (in string, re []string, sw []string, err error) {
+		if len(s.InitialProtocol) != 0 {
+			if len(s.PeerStatic) == 0 && s.InitialProtocol[6:8] == "IK" {
+				err = errors.New("PeerStatic required for IK handshake")
+			}
+			in = s.InitialProtocol
+			sw = s.SwitchProtocols
+			re = s.RetryProtocols
+		} else {
+			if len(s.PeerStatic) == 0 {
+				in = "Noise_XX_25519_AESGCM_SHA256"
+			} else {
+				in = "Noise_IK_25519_AESGCM_SHA256"
+				sw = []string{"Noise_XXfallback_25519_AESGCM_SHA256"}
+			}
+			re = []string{"Noise_XX_25519_ChaChaPoly_SHA256"}
+		}
+		return
+	}()
+
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
 	negData, _ = proto.Marshal(negotiationData)
 
-	hs, dh, cipher, hash, err := parseProtocolName(negotiationData.InitialProtocol)
-	if err != nil {
-		return nil, nil, nil, err
-	}
+	hs, dh, cipher, hash, _ := parseProtocolName(negotiationData.InitialProtocol)
 
 	prologue := makePrologue([][]byte{negData}, []byte("NoiseSocketInit1"))
 	state, err = noise.NewHandshakeState(noise.Config{
@@ -76,11 +92,17 @@ func ParseNegotiationData(data []byte, s ConnectionConfig) (state *noise.Handsha
 	if err != nil {
 		panic(err)
 	}
-	if _, ok = supportedInitialProtocols[dataParsed.InitialProtocol]; !ok {
+	initialProtocol := dataParsed.GetInitialProtocol()
+	if _, ok = supportedInitialProtocols[initialProtocol]; !ok {
+		for _, pName := range dataParsed.GetSwitchProtocol() {
+			if _, ok = supportedRetryProtocols[pName]; ok {
+				return nil, errors.New("retry")
+			}
+		}
 		return nil, errors.New("unsupported initial protocol")
 	}
 
-	hs, dh, cipher, hash, err = parseProtocolName(dataParsed.InitialProtocol)
+	hs, dh, cipher, hash, _ = parseProtocolName(initialProtocol)
 
 	prologue := makePrologue([][]byte{data}, []byte("NoiseSocketInit1"))
 	state, err = noise.NewHandshakeState(noise.Config{
@@ -97,7 +119,6 @@ func ParseNegotiationData(data []byte, s ConnectionConfig) (state *noise.Handsha
 }
 
 func makePrologue(dataSlice [][]byte, initString []byte) (output []byte) {
-	log.Printf("dataslice %s\n%v", dataSlice, dataSlice)
 	output = append(initString, output...)
 	for _, data := range dataSlice {
 		dataLen := make([]byte, 2, uint16Size+len(data))
@@ -106,7 +127,6 @@ func makePrologue(dataSlice [][]byte, initString []byte) (output []byte) {
 		output = append(output, data...)
 	}
 	output = append(output, appPrologue...)
-	log.Printf("output %s\n%v", output, output)
 	return
 }
 
@@ -131,20 +151,20 @@ func newNegotiationData(t interface{}) (n negotiationData, err error) {
 	return
 }
 
-func makeResponse(protoName string, responseType string, prologueData [][]byte, peerEphemeral []byte, localStatic noise.DHKey) (response []byte, hs *noise.HandshakeState, err error) {
+func makeResponse(protoName string, responseType int, prologueData [][]byte, peerEphemeral []byte, localStatic noise.DHKey) (response []byte, hs *noise.HandshakeState, err error) {
 	var initString []byte
 	protoResponse := &NoiseLinkNegotiationDataResponse1{}
 	switch responseType {
-	case "reject":
+	case RESPONSE_REJECT:
 		protoResponse.Response = &NoiseLinkNegotiationDataResponse1_Rejected{
 			Rejected: true,
 		}
-	case "switch":
+	case RESPONSE_SWITCH:
 		protoResponse.Response = &NoiseLinkNegotiationDataResponse1_SwitchProtocol{
 			SwitchProtocol: protoName,
 		}
 		initString = []byte("NoiseSocketInit2")
-	case "retry":
+	case RESPONSE_RETRY:
 		protoResponse.Response = &NoiseLinkNegotiationDataResponse1_RetryProtocol{
 			RetryProtocol: protoName,
 		}
@@ -152,8 +172,8 @@ func makeResponse(protoName string, responseType string, prologueData [][]byte, 
 	default:
 		return nil, nil, errors.New("Invalid request data")
 	}
+	response, _ = proto.Marshal(protoResponse)
 	if initString != nil {
-		response, _ = proto.Marshal(protoResponse)
 		prologue := makePrologue(append(prologueData, [][]byte{response}...), initString)
 		pattern, dh, cipher, hash, _ := parseProtocolName(protoName)
 		hs, err = noise.NewHandshakeState(noise.Config{
@@ -170,5 +190,34 @@ func makeResponse(protoName string, responseType string, prologueData [][]byte, 
 			PeerEphemeral: peerEphemeral,
 		})
 	}
+	return
+}
+
+func parseResponse(response *NoiseLinkNegotiationDataResponse1, responseType int, prologueData [][]byte, localEphemeral noise.DHKey, localStatic noise.DHKey) (state *noise.HandshakeState, err error) {
+	var pName string
+	var initString []byte
+	switch responseType {
+	case RESPONSE_SWITCH:
+		r := response.Response.(*NoiseLinkNegotiationDataResponse1_SwitchProtocol)
+		pName = r.SwitchProtocol
+		initString = []byte("NoiseSocketInit2")
+	case RESPONSE_RETRY:
+		r := response.Response.(*NoiseLinkNegotiationDataResponse1_RetryProtocol)
+		pName = r.RetryProtocol
+		initString = []byte("NoiseSocketInit3")
+	}
+	prologue := makePrologue(prologueData, initString)
+	pattern, dh, cipher, hash, _ := parseProtocolName(pName)
+	state, err = noise.NewHandshakeState(noise.Config{
+		StaticKeypair:    localStatic,
+		EphemeralKeypair: localEphemeral,
+		Pattern:          patternByteObj[pattern],
+		CipherSuite: noise.NewCipherSuite(
+			dhByteObj[dh],
+			cipherByteObj[cipher],
+			hashByteObj[hash],
+		),
+		Prologue: prologue,
+	})
 	return
 }

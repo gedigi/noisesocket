@@ -6,8 +6,6 @@ import (
 
 	"math"
 
-	"fmt"
-
 	"github.com/gedigi/noisesocket/noise"
 	"github.com/pkg/errors"
 )
@@ -77,7 +75,7 @@ func (h *halfConn) decryptIfNeeded(b *buffer) (off, length int, err error) {
 		//fmt.Println("decrypt len", dataLen)
 
 		if dataLen > (uint16(len(payload))) {
-			return 0, 0, errors.New(fmt.Sprintf("invalid packet data: %d %d", dataLen, len(payload)))
+			return 0, 0, errors.Errorf("Invalid packet data: %d %d", dataLen, len(payload))
 		}
 		b.resize(uint16Size + uint16Size + int(dataLen))
 		return uint16Size + uint16Size, int(dataLen), nil

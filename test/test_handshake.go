@@ -21,14 +21,10 @@ func main() {
 	ncClient = noisesocket.ConnectionConfig{
 		IsClient:      true,
 		StaticKeypair: clientKey,
-		DHFunc:        noisesocket.NOISE_DH_CURVE25519,
-		CipherFunc:    noisesocket.NOISE_CIPHER_AESGCM,
-		HashFunc:      noisesocket.NOISE_HASH_SHA256,
 		PeerStatic:    clientKey.Public,
 	}
 	ncServer = noisesocket.ConnectionConfig{
 		IsClient:      false,
-		DHFunc:        noisesocket.NOISE_DH_CURVE25519,
 		StaticKeypair: serverKey,
 	}
 
@@ -38,8 +34,12 @@ func main() {
 	time.Sleep(2 * time.Second)
 
 	// Client
+	startClient(&ncClient, &serverChan)
+}
+
+func startClient(conf *noisesocket.ConnectionConfig, c *chan string) {
 	log.Print("Starting client")
-	conn, err := noisesocket.Dial("127.0.0.1:12345", ":0", &ncClient)
+	conn, err := noisesocket.Dial("127.0.0.1:12345", ":0", conf)
 	if err != nil {
 		log.Print(err)
 	}
@@ -47,8 +47,9 @@ func main() {
 	msg := []byte("hello")
 	n, err := conn.Write(msg)
 	log.Printf("writing %d %s %s\n", n, err, msg)
-	log.Printf("%s", <-serverChan)
+	log.Printf("%s", <-*c)
 	conn.Close()
+
 }
 
 func startServer(conf *noisesocket.ConnectionConfig, c *chan string) {

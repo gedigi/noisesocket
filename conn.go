@@ -34,10 +34,11 @@ type ConnectionConfig struct {
 	StaticKeypair  noise.DHKey
 	PeerStatic     []byte
 	Padding        uint16
-	DHFunc         byte
-	CipherFunc     byte
-	HashFunc       byte
-	ServerName     string
+
+	ServerName      string
+	InitialProtocol string
+	RetryProtocols  []string
+	SwitchProtocols []string
 }
 
 type ConnectionInfo struct {
@@ -490,45 +491,19 @@ func (c *Conn) RunClientHandshake() error {
 	if len(negotiationData) != 0 {
 		switch protoNegotiationData.Response.(type) {
 		case *NoiseLinkNegotiationDataResponse1_Rejected:
-			return errors.New("Server rejected connection")
+			return errors.New("Server rejected handshake")
 		case *NoiseLinkNegotiationDataResponse1_SwitchProtocol:
-			r := protoNegotiationData.Response.(*NoiseLinkNegotiationDataResponse1_SwitchProtocol)
-			prologue := makePrologue([][]byte{
+			state, err = parseResponse(protoNegotiationData, RESPONSE_SWITCH, [][]byte{
 				negData,
 				msg,
 				negotiationData,
-			}, []byte("NoiseSocketInit2"))
-			pattern, dh, cipher, hash, _ := parseProtocolName(r.SwitchProtocol)
-			state, _ = noise.NewHandshakeState(noise.Config{
-				StaticKeypair:    state.LocalStatic(),
-				EphemeralKeypair: state.LocalEphemeral(),
-				Pattern:          patternByteObj[pattern],
-				CipherSuite: noise.NewCipherSuite(
-					dhByteObj[dh],
-					cipherByteObj[cipher],
-					hashByteObj[hash],
-				),
-				Prologue: prologue,
-			})
+			}, state.LocalEphemeral(), state.LocalStatic())
 		case *NoiseLinkNegotiationDataResponse1_RetryProtocol:
-			r := protoNegotiationData.Response.(*NoiseLinkNegotiationDataResponse1_RetryProtocol)
-			prologue := makePrologue([][]byte{
+			state, err = parseResponse(protoNegotiationData, RESPONSE_RETRY, [][]byte{
 				negData,
 				msg,
 				negotiationData,
-			}, []byte("NoiseSocketInit3"))
-			pattern, dh, cipher, hash, _ := parseProtocolName(r.RetryProtocol)
-			state, _ = noise.NewHandshakeState(noise.Config{
-				StaticKeypair: state.LocalStatic(),
-				Pattern:       patternByteObj[pattern],
-				CipherSuite: noise.NewCipherSuite(
-					dhByteObj[dh],
-					cipherByteObj[cipher],
-					hashByteObj[hash],
-				),
-				Prologue: prologue,
-			})
-
+			}, noise.DHKey{}, state.LocalStatic())
 		}
 	}
 
@@ -571,7 +546,29 @@ func (c *Conn) RunClientHandshake() error {
 		c.out.freeBlock(b)
 
 		if csIn == nil || csOut == nil {
-			panic("not supported")
+			// panic("not supported")
+			// may be a retry
+			if err := c.readPacket(); err != nil {
+				return err
+			}
+
+			_ = c.hand.Next(c.hand.Len())
+
+			//read noise message
+			if err := c.readPacket(); err != nil {
+				return err
+			}
+
+			msg = c.hand.Next(c.hand.Len())
+
+			// cannot reuse msg for read, need another buf
+			inBlock := c.in.newBlock()
+			inBlock.reserve(len(msg))
+			_, csIn, csOut, err = state.ReadMessage(inBlock.data, msg)
+			if err != nil {
+				c.in.freeBlock(inBlock)
+				return err
+			}
 		}
 
 	}
@@ -613,7 +610,7 @@ func (c *Conn) RunServerHandshake() error {
 		// Switch
 		for _, v := range protoNegData.GetSwitchProtocol() {
 			if _, ok := supportedSwitchProtocols[v]; ok {
-				response, hs, err = makeResponse(v, "switch", [][]byte{
+				response, hs, err = makeResponse(v, RESPONSE_SWITCH, [][]byte{
 					negData,
 					noiseMsg,
 				}, hs.PeerEphemeral(), hs.LocalStatic())
@@ -623,7 +620,7 @@ func (c *Conn) RunServerHandshake() error {
 			// Retry
 			for _, v := range protoNegData.GetRetryProtocol() {
 				if _, ok := supportedRetryProtocols[v]; ok {
-					response, hs, err = makeResponse(v, "retry", [][]byte{
+					response, hs, err = makeResponse(v, RESPONSE_RETRY, [][]byte{
 						negData,
 						noiseMsg,
 					}, nil, hs.LocalStatic())
@@ -632,7 +629,12 @@ func (c *Conn) RunServerHandshake() error {
 		}
 		if response == nil {
 			// Reject
-			response, hs, err = makeResponse("", "reject", nil, nil, noise.DHKey{})
+			response, hs, err = makeResponse("", RESPONSE_REJECT, nil, nil, noise.DHKey{})
+			_, err = c.writePacket(response)
+			if err != nil {
+				return err
+			}
+			return nil
 		}
 	} else {
 		err = c.processCallback(hs.PeerStatic(), payload)
@@ -690,7 +692,24 @@ func (c *Conn) RunServerHandshake() error {
 		}
 
 		if csIn == nil || csOut == nil {
-			return errors.New("Not supported")
+			// return errors.New("Not supported")
+			b := c.out.newBlock()
+
+			if b.data, csIn, csOut, err = hs.WriteMessage(b.data, c.config.Payload); err != nil {
+				c.out.freeBlock(b)
+				return err
+			}
+
+			if _, err = c.writePacket(nil); err != nil {
+				c.out.freeBlock(b)
+				return err
+			}
+
+			if _, err = c.writePacket(b.data); err != nil {
+				c.out.freeBlock(b)
+				return err
+			}
+			c.out.freeBlock(b)
 		}
 	}
 	c.in.cs = csOut
