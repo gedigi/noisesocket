@@ -21,7 +21,7 @@ func main() {
 	ncClient = noisesocket.ConnectionConfig{
 		IsClient:      true,
 		StaticKeypair: clientKey,
-		PeerStatic:    clientKey.Public,
+		PeerStatic:    serverKey.Public,
 	}
 	ncServer = noisesocket.ConnectionConfig{
 		IsClient:      false,

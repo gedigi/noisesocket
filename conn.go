@@ -23,6 +23,8 @@ import (
 	"github.com/pkg/errors"
 )
 
+var allowSwitch = true
+
 const MaxPayloadSize = math.MaxUint16 - 16 /*mac size*/ - uint16Size /*data len*/
 
 type VerifyCallbackFunc func(publicKey []byte, data []byte) error
@@ -488,7 +490,8 @@ func (c *Conn) RunClientHandshake() error {
 	proto.Unmarshal(negotiationData, protoNegotiationData)
 
 	// if len(negotiationData) != 0 || len(msg) == 0 {
-	if len(negotiationData) != 0 {
+	if len(negotiationData) != 0 && allowSwitch {
+		allowSwitch = false
 		switch protoNegotiationData.Response.(type) {
 		case *NoiseLinkNegotiationDataResponse1_Rejected:
 			return errors.New("Server rejected handshake")
@@ -544,33 +547,6 @@ func (c *Conn) RunClientHandshake() error {
 			return err
 		}
 		c.out.freeBlock(b)
-
-		if csIn == nil || csOut == nil {
-			// panic("not supported")
-			// may be a retry
-			if err := c.readPacket(); err != nil {
-				return err
-			}
-
-			_ = c.hand.Next(c.hand.Len())
-
-			//read noise message
-			if err := c.readPacket(); err != nil {
-				return err
-			}
-
-			msg = c.hand.Next(c.hand.Len())
-
-			// cannot reuse msg for read, need another buf
-			inBlock := c.in.newBlock()
-			inBlock.reserve(len(msg))
-			_, csIn, csOut, err = state.ReadMessage(inBlock.data, msg)
-			if err != nil {
-				c.in.freeBlock(inBlock)
-				return err
-			}
-		}
-
 	}
 
 	c.in.cs = csOut
@@ -582,6 +558,7 @@ func (c *Conn) RunClientHandshake() error {
 }
 
 func (c *Conn) RunServerHandshake() error {
+start:
 	var csOut, csIn *noise.CipherState
 	if err := c.readPacket(); err != nil {
 		return err
@@ -606,7 +583,8 @@ func (c *Conn) RunServerHandshake() error {
 	payload, _, _, err := hs.ReadMessage(nil, noiseMsg)
 
 	var response []byte
-	if err != nil {
+	if err != nil && allowSwitch {
+		allowSwitch = false
 		// Switch
 		for _, v := range protoNegData.GetSwitchProtocol() {
 			if _, ok := supportedSwitchProtocols[v]; ok {
@@ -620,14 +598,14 @@ func (c *Conn) RunServerHandshake() error {
 			// Retry
 			for _, v := range protoNegData.GetRetryProtocol() {
 				if _, ok := supportedRetryProtocols[v]; ok {
-					response, hs, err = makeResponse(v, RESPONSE_RETRY, [][]byte{
-						negData,
-						noiseMsg,
-					}, nil, hs.LocalStatic())
+					response, hs, err = makeResponse(v, RESPONSE_RETRY, nil, nil, noise.DHKey{})
+					_, err = c.writePacket(response)
+					if err != nil {
+						return err
+					}
+					goto start
 				}
 			}
-		}
-		if response == nil {
 			// Reject
 			response, hs, err = makeResponse("", RESPONSE_REJECT, nil, nil, noise.DHKey{})
 			_, err = c.writePacket(response)
@@ -689,27 +667,6 @@ func (c *Conn) RunServerHandshake() error {
 		err = c.processCallback(hs.PeerStatic(), payload)
 		if err != nil {
 			return err
-		}
-
-		if csIn == nil || csOut == nil {
-			// return errors.New("Not supported")
-			b := c.out.newBlock()
-
-			if b.data, csIn, csOut, err = hs.WriteMessage(b.data, c.config.Payload); err != nil {
-				c.out.freeBlock(b)
-				return err
-			}
-
-			if _, err = c.writePacket(nil); err != nil {
-				c.out.freeBlock(b)
-				return err
-			}
-
-			if _, err = c.writePacket(b.data); err != nil {
-				c.out.freeBlock(b)
-				return err
-			}
-			c.out.freeBlock(b)
 		}
 	}
 	c.in.cs = csOut
