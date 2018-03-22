@@ -97,7 +97,6 @@ func ParseNegotiationData(data []byte, s ConnectionConfig) (state *noise.Handsha
 }
 
 func makePrologue(dataSlice [][]byte, initString []byte) (output []byte) {
-	log.Printf("dataslice %s\n%v", dataSlice, dataSlice)
 	output = append(initString, output...)
 	for _, data := range dataSlice {
 		dataLen := make([]byte, 2, uint16Size+len(data))
