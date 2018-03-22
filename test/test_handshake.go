@@ -21,14 +21,10 @@ func main() {
 	ncClient = noisesocket.ConnectionConfig{
 		IsClient:      true,
 		StaticKeypair: clientKey,
-		DHFunc:        noisesocket.NOISE_DH_CURVE25519,
-		CipherFunc:    noisesocket.NOISE_CIPHER_AESGCM,
-		HashFunc:      noisesocket.NOISE_HASH_SHA256,
 		PeerStatic:    clientKey.Public,
 	}
 	ncServer = noisesocket.ConnectionConfig{
 		IsClient:      false,
-		DHFunc:        noisesocket.NOISE_DH_CURVE25519,
 		StaticKeypair: serverKey,
 	}
 

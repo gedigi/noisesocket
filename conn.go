@@ -34,10 +34,11 @@ type ConnectionConfig struct {
 	StaticKeypair  noise.DHKey
 	PeerStatic     []byte
 	Padding        uint16
-	DHFunc         byte
-	CipherFunc     byte
-	HashFunc       byte
-	ServerName     string
+
+	ServerName      string
+	InitialProtocol string
+	SwitchProtocols []string
+	RetryProtocols  []string
 }
 
 type ConnectionInfo struct {
@@ -467,9 +468,11 @@ func (c *Conn) RunClientHandshake() error {
 		csIn, csOut  *noise.CipherState
 	)
 
-	if negData, msg, state, err = ComposeInitiatorHandshakeMessage(c.config); err != nil {
+	if negData, state, err = ComposeInitiatorHandshakeMessage(c.config); err != nil {
 		return err
 	}
+	msg, _, _, err = state.WriteMessage(msg, c.config.Payload)
+
 	if _, err = c.writePacket(negData); err != nil {
 		return err
 	}

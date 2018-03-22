@@ -15,30 +15,45 @@ var appPrologue = []byte("NLS(revision2)")
 
 // ComposeInitiatorHandshakeMessage generates handshakeState and the first noise message.
 func ComposeInitiatorHandshakeMessage(s ConnectionConfig) (
-	negData, msg []byte,
+	negData []byte,
 	state *noise.HandshakeState,
 	err error,
 ) {
 
-	if len(s.PeerStatic) != 0 && len(s.PeerStatic) != dhs[s.DHFunc].DHLen() {
-		return nil, nil, nil, errors.New("only 32 byte curve25519 public keys are supported")
+	if len(s.PeerStatic) != 0 && len(s.PeerStatic) != dhs[NOISE_DH_CURVE25519].DHLen() {
+		return nil, nil, errors.New("only 32 byte curve25519 public keys are supported")
 	}
 
 	negotiationData := new(NoiseLinkNegotiationDataRequest1)
 	negotiationData.ServerName = s.ServerName
 
-	if len(s.PeerStatic) == 0 {
-		negotiationData.InitialProtocol = "Noise_XX_25519_AESGCM_SHA256"
-	} else {
-		negotiationData.InitialProtocol = "Noise_IK_25519_AESGCM_SHA256"
-		negotiationData.SwitchProtocol = []string{"Noise_XXfallback_25519_AESGCM_SHA256"}
-	}
+	negotiationData.InitialProtocol, negotiationData.RetryProtocol, negotiationData.SwitchProtocol, err =
+		func() (in string, re []string, sw []string, err error) {
+			if len(s.InitialProtocol) != 0 {
+				if len(s.PeerStatic) == 0 && s.InitialProtocol[6:8] == "IK" {
+					err = errors.New("IK needs PeerStatic")
+				} else {
+					in = s.InitialProtocol
+					sw = s.SwitchProtocols
+					re = s.RetryProtocols
+				}
+			} else {
+				if len(s.PeerStatic) == 0 {
+					in = "Noise_XX_25519_AESGCM_SHA256"
+				} else {
+					in = "Noise_IK_25519_AESGCM_SHA256"
+					sw = []string{"Noise_XXfallback_25519_AESGCM_SHA256"}
+				}
+				re = []string{"Noise_XX_25519_ChaChaPoly_SHA256"}
+			}
+			return
+		}()
 
 	negData, _ = proto.Marshal(negotiationData)
 
 	hs, dh, cipher, hash, err := parseProtocolName(negotiationData.InitialProtocol)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	prologue := makePrologue([][]byte{negData}, []byte("NoiseSocketInit1"))
@@ -55,13 +70,6 @@ func ComposeInitiatorHandshakeMessage(s ConnectionConfig) (
 		Prologue:   prologue,
 		Random:     rand.Reader,
 	})
-
-	if err != nil {
-		return
-	}
-
-	msg, _, _, err = state.WriteMessage(msg, s.Payload)
-
 	return
 }
 
@@ -106,27 +114,6 @@ func makePrologue(dataSlice [][]byte, initString []byte) (output []byte) {
 	}
 	output = append(output, appPrologue...)
 	log.Printf("output %s\n%v", output, output)
-	return
-}
-
-// NegotiationData struct
-type negotiationData struct {
-	Encoded []byte
-	Raw     proto.Message
-}
-
-func newNegotiationData(t interface{}) (n negotiationData, err error) {
-	// n = &negotiationData{}
-	switch tType := t.(type) {
-	case []byte:
-		n.Encoded = t.([]byte)
-		err = proto.Unmarshal(n.Encoded, n.Raw)
-	case proto.Message:
-		n.Raw = t.(proto.Message)
-		n.Encoded, err = proto.Marshal(n.Raw)
-	default:
-		err = errors.Errorf("Can't handle type %T", tType)
-	}
 	return
 }
 
