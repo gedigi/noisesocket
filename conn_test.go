@@ -32,10 +32,15 @@ func TestSwitch(t *testing.T) {
 
 	serverChan := make(chan string)
 	// Server
-	go startServer(&ncServer, &serverChan)
+	go startServer(&ncServer, &serverChan, "12345")
 	time.Sleep(2 * time.Second)
 
-	startClient(&ncClient, &serverChan)
+	go startClient(&ncClient, &serverChan, "12345")
+	a := <-serverChan
+	b := <-serverChan
+	if a != b {
+		t.Errorf("Error: %s != %s", a, b)
+	}
 
 }
 func TestRetry(t *testing.T) {
@@ -60,10 +65,10 @@ func TestRetry(t *testing.T) {
 
 	serverChan := make(chan string)
 	// Server
-	go startServer(&ncServer, &serverChan)
+	go startServer(&ncServer, &serverChan, "12346")
 	time.Sleep(2 * time.Second)
 
-	startClient(&ncClient, &serverChan)
+	go startClient(&ncClient, &serverChan, "12346")
 	a := <-serverChan
 	b := <-serverChan
 	if a != b {
@@ -92,49 +97,21 @@ func TestReject(t *testing.T) {
 
 	serverChan := make(chan string)
 	// Server
-	go startServer(&ncServer, &serverChan)
+	go startServer(&ncServer, &serverChan, "12347")
 	time.Sleep(2 * time.Second)
 
-	go startClient(&ncClient, &serverChan)
+	go startClient(&ncClient, &serverChan, "12347")
 	a := <-serverChan
-	b := <-serverChan
-	if a != b {
-		t.Errorf("Error: %s != %s", a, b)
+	_ = <-serverChan
+	if a != "Server rejected connection" {
+		t.Errorf("Error: %s != \"Server rejected connection\"", a)
 	}
 
 }
 
-// func main() {
-// 	var ncClient, ncServer ConnectionConfig
-
-// 	clientKey, _ := noise.DH25519.GenerateKeypair(rand.Reader)
-// 	serverKey, _ := noise.DH25519.GenerateKeypair(rand.Reader)
-// 	log.Printf("Client Keypair: %+v", clientKey)
-// 	log.Printf("Server Keypair: %+v", serverKey)
-
-// 	ncClient = ConnectionConfig{
-// 		IsClient:        true,
-// 		StaticKeypair:   clientKey,
-// 		PeerStatic:      clientKey.Public,
-// 		InitialProtocol: "Noise_IK_25519_AESGCM_SHA256",
-// 		SwitchProtocols: []string{"Noise_XXfallback_25519_AESGCM_SHA256"},
-// 	}
-// 	ncServer = ConnectionConfig{
-// 		IsClient:      false,
-// 		StaticKeypair: serverKey,
-// 	}
-
-// 	serverChan := make(chan string)
-// 	// Server
-// 	go startServer(&ncServer, &serverChan)
-// 	time.Sleep(2 * time.Second)
-
-// 	startClient(&ncClient, &serverChan)
-// }
-
-func startClient(conf *ConnectionConfig, c *chan string) {
+func startClient(conf *ConnectionConfig, c *chan string, port string) {
 	log.Print("Starting client")
-	conn, err := Dial("127.0.0.1:12345", ":0", conf)
+	conn, err := Dial("127.0.0.1:"+port, ":0", conf)
 	if err != nil {
 		log.Print(err)
 	}
@@ -148,9 +125,9 @@ func startClient(conf *ConnectionConfig, c *chan string) {
 	}
 }
 
-func startServer(conf *ConnectionConfig, c *chan string) {
+func startServer(conf *ConnectionConfig, c *chan string, port string) {
 	log.Print("Starting server")
-	dialer, err := Listen("127.0.0.1:12345", conf)
+	dialer, err := Listen("127.0.0.1:"+port, conf)
 	if err != nil {
 		log.Print(err)
 	}
