@@ -75,6 +75,9 @@ type Conn struct {
 	connectionInfo []byte
 	HandshakeData  []byte
 	config         ConnectionConfig
+
+	prologue    [][]byte
+	allowSwitch bool
 }
 
 // Access to net.Conn methods.
@@ -440,6 +443,7 @@ func (c *Conn) Handshake() error {
 
 	c.handshakeMutex.Lock()
 
+	c.allowSwitch = true
 	if c.config.IsClient {
 		c.handshakeErr = c.RunClientHandshake()
 	} else {
@@ -468,9 +472,16 @@ func (c *Conn) RunClientHandshake() error {
 		csIn, csOut  *noise.CipherState
 	)
 
-	if negData, state, err = ComposeInitiatorHandshakeMessage(c.config); err != nil {
+	negData, protoNegData, err := makeInitiatorRequest(&c.config)
+	if err != nil {
 		return err
 	}
+	c.prologue = [][]byte{negData}
+	state, err = makeInitiatorState(&c.config, &c.prologue, protoNegData, "NoiseSocketInit1")
+	// if negData, state, err = ComposeInitiatorHandshakeMessage(c.config); err != nil {
+	// 	return err
+	// }
+start:
 	msg, _, _, err = state.WriteMessage(msg, c.config.Payload)
 
 	if _, err = c.writePacket(negData); err != nil {
@@ -490,17 +501,28 @@ func (c *Conn) RunClientHandshake() error {
 	proto.Unmarshal(negotiationData, protoNegotiationData)
 
 	// if len(negotiationData) != 0 || len(msg) == 0 {
-	if len(negotiationData) != 0 {
+	if len(negotiationData) != 0 && c.allowSwitch {
+		c.allowSwitch = false
 		switch protoNegotiationData.Response.(type) {
 		case *NoiseLinkNegotiationDataResponse1_Rejected:
 			return errors.New("Server rejected connection")
+		case *NoiseLinkNegotiationDataResponse1_RetryProtocol:
+			r := protoNegotiationData.Response.(*NoiseLinkNegotiationDataResponse1_RetryProtocol)
+			c.config.InitialProtocol = r.RetryProtocol
+			c.config.RetryProtocols = nil
+			c.config.SwitchProtocols = nil
+			c.config.PeerStatic = nil
+			negData, protoNegData, err = makeInitiatorRequest(&c.config)
+			if err != nil {
+				return err
+			}
+			c.prologue = append(c.prologue, [][]byte{msg, negotiationData, negData}...)
+			state, err = makeInitiatorState(&c.config, &c.prologue, protoNegData, "NoiseSocketInit3")
+			msg = nil
+			goto start
 		case *NoiseLinkNegotiationDataResponse1_SwitchProtocol:
 			r := protoNegotiationData.Response.(*NoiseLinkNegotiationDataResponse1_SwitchProtocol)
-			prologue := makePrologue([][]byte{
-				negData,
-				msg,
-				negotiationData,
-			}, []byte("NoiseSocketInit2"))
+			c.prologue = append(c.prologue, [][]byte{msg, negData}...)
 			pattern, dh, cipher, hash, _ := parseProtocolName(r.SwitchProtocol)
 			state, _ = noise.NewHandshakeState(noise.Config{
 				StaticKeypair:    state.LocalStatic(),
@@ -511,27 +533,8 @@ func (c *Conn) RunClientHandshake() error {
 					cipherByteObj[cipher],
 					hashByteObj[hash],
 				),
-				Prologue: prologue,
+				Prologue: makePrologue(c.prologue, []byte("NoiseSocketInit2")),
 			})
-		case *NoiseLinkNegotiationDataResponse1_RetryProtocol:
-			r := protoNegotiationData.Response.(*NoiseLinkNegotiationDataResponse1_RetryProtocol)
-			prologue := makePrologue([][]byte{
-				negData,
-				msg,
-				negotiationData,
-			}, []byte("NoiseSocketInit3"))
-			pattern, dh, cipher, hash, _ := parseProtocolName(r.RetryProtocol)
-			state, _ = noise.NewHandshakeState(noise.Config{
-				StaticKeypair: state.LocalStatic(),
-				Pattern:       patternByteObj[pattern],
-				CipherSuite: noise.NewCipherSuite(
-					dhByteObj[dh],
-					cipherByteObj[cipher],
-					hashByteObj[hash],
-				),
-				Prologue: prologue,
-			})
-
 		}
 	}
 
@@ -589,6 +592,8 @@ func (c *Conn) RunClientHandshake() error {
 
 func (c *Conn) RunServerHandshake() error {
 	var csOut, csIn *noise.CipherState
+	var initString []byte
+start:
 	if err := c.readPacket(); err != nil {
 		return err
 	}
@@ -599,7 +604,15 @@ func (c *Conn) RunServerHandshake() error {
 	if err != nil {
 		return err
 	}
-	hs, err := ParseNegotiationData(negData, c.config)
+	if c.allowSwitch {
+		initString = []byte("NoiseSocketInit1")
+		c.prologue = [][]byte{negData}
+	} else {
+		initString = []byte("NoiseSocketInit3")
+		c.prologue = append(c.prologue, [][]byte{negData}...)
+	}
+
+	hs, err := ParseNegotiationData(&negData, &c.config, &c.prologue, &initString)
 
 	if err != nil {
 		return err
@@ -612,30 +625,33 @@ func (c *Conn) RunServerHandshake() error {
 	payload, _, _, err := hs.ReadMessage(nil, noiseMsg)
 
 	var response []byte
-	if err != nil {
+	if err != nil && c.allowSwitch {
+		c.allowSwitch = false
 		// Switch
 		for _, v := range protoNegData.GetSwitchProtocol() {
 			if _, ok := supportedSwitchProtocols[v]; ok {
-				response, hs, err = makeResponse(v, "switch", [][]byte{
-					negData,
-					noiseMsg,
-				}, hs.PeerEphemeral(), hs.LocalStatic())
+				response, err = makeResponse(v, RESPONSE_SWITCH)
+				c.prologue = append(c.prologue, [][]byte{noiseMsg, negData}...)
+				hs, err = makeResponseState(v, &c.prologue, hs.PeerEphemeral(), hs.LocalStatic(), []byte("NoiseSocketInit2"))
 			}
 		}
 		if response == nil {
 			// Retry
 			for _, v := range protoNegData.GetRetryProtocol() {
 				if _, ok := supportedRetryProtocols[v]; ok {
-					response, hs, err = makeResponse(v, "retry", [][]byte{
-						negData,
-						noiseMsg,
-					}, nil, hs.LocalStatic())
+					response, err = makeResponse(v, RESPONSE_RETRY)
+					_, err = c.writePacket(response)
+					if err != nil {
+						return err
+					}
+					c.prologue = append(c.prologue, [][]byte{noiseMsg, response}...)
+					goto start
 				}
 			}
-		}
-		if response == nil {
 			// Reject
-			response, hs, err = makeResponse("", "reject", nil, nil, noise.DHKey{})
+			response, err = makeResponse("", RESPONSE_REJECT)
+			_, err = c.writePacket(response)
+			return err
 		}
 	} else {
 		err = c.processCallback(hs.PeerStatic(), payload)
