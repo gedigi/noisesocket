@@ -522,6 +522,7 @@ start:
 			c.hp.currentProtoName = r.SwitchProtocol
 			c.hp.prologue = append(c.hp.prologue, [][]byte{msg, negotiationData}...)
 			c.hp.localEphemeral = state.LocalEphemeral()
+			c.hp.peerStatic = nil
 			state, _ = c.hp.makeResponseState("NoiseSocketInit2")
 		}
 	}
