@@ -19,14 +19,12 @@ func TestSwitch(t *testing.T) {
 	log.Printf("Server Keypair: %+v", serverKey)
 
 	ncClient = ConnectionConfig{
-		IsClient:        true,
 		StaticKeypair:   clientKey,
 		PeerStatic:      clientKey.Public,
 		InitialProtocol: "Noise_IK_25519_AESGCM_SHA256",
 		SwitchProtocols: []string{"Noise_XXfallback_25519_AESGCM_SHA256"},
 	}
 	ncServer = ConnectionConfig{
-		IsClient:      false,
 		StaticKeypair: serverKey,
 	}
 
@@ -52,14 +50,12 @@ func TestRetry(t *testing.T) {
 	log.Printf("Server Keypair: %+v", serverKey)
 
 	ncClient = ConnectionConfig{
-		IsClient:        true,
 		StaticKeypair:   clientKey,
 		PeerStatic:      clientKey.Public,
 		InitialProtocol: "Noise_IK_25519_AESGCM_SHA256",
 		RetryProtocols:  []string{"Noise_XX_25519_AESGCM_SHA256"},
 	}
 	ncServer = ConnectionConfig{
-		IsClient:      false,
 		StaticKeypair: serverKey,
 	}
 
@@ -85,13 +81,11 @@ func TestReject(t *testing.T) {
 	log.Printf("Server Keypair: %+v", serverKey)
 
 	ncClient = ConnectionConfig{
-		IsClient:        true,
 		StaticKeypair:   clientKey,
 		PeerStatic:      clientKey.Public,
 		InitialProtocol: "Noise_IK_25519_AESGCM_SHA256",
 	}
 	ncServer = ConnectionConfig{
-		IsClient:      false,
 		StaticKeypair: serverKey,
 	}
 

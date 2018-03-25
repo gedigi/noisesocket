@@ -34,6 +34,7 @@ func Listen(laddr string, config *ConnectionConfig) (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
+	config.isClient = false
 	return &listener{
 		Listener: l,
 		config:   config,
@@ -66,7 +67,7 @@ func Dial(addr string, localaddr string, config *ConnectionConfig) (*Conn, error
 		return nil, err
 	}
 
-	config.IsClient = true
+	config.isClient = true
 	addr, _, err = net.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
