@@ -598,7 +598,7 @@ start:
 		initString = "NoiseSocketInit3"
 	}
 
-	err = ParseNegotiationData(&negData, &c.config, &c.hp)
+	err = parseNegotiationData(&negData, &c.config, &c.hp)
 	if err != nil {
 		return err
 	}

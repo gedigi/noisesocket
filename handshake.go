@@ -12,6 +12,38 @@ import (
 
 var appPrologue = []byte("NLS(revision2)")
 
+type handshakeParams struct {
+	prologue    [][]byte
+	allowSwitch bool
+
+	localStatic    noise.DHKey
+	localEphemeral noise.DHKey
+	peerEphemeral  []byte
+	peerStatic     []byte
+
+	currentProtoName string
+}
+
+func parseNegotiationData(data *[]byte, s *ConnectionConfig, hp *handshakeParams) (err error) {
+
+	var ok bool
+
+	dataParsed := new(NoiseLinkNegotiationDataRequest1)
+	err = proto.Unmarshal(*data, dataParsed)
+	if err != nil {
+		panic(err)
+	}
+	if _, ok = supportedInitialProtocols[dataParsed.InitialProtocol]; !ok {
+		// TODO: handle retry here
+		err = errors.New("unsupported initial protocol")
+		return
+	}
+	hp.currentProtoName = dataParsed.InitialProtocol
+	hp.prologue = append(hp.prologue, [][]byte{*data}...)
+	hp.localStatic = s.StaticKeypair
+	return
+}
+
 func makeInitiatorRequest(s *ConnectionConfig, hp *handshakeParams) (negData []byte, n *NoiseLinkNegotiationDataRequest1, err error) {
 	if len(s.PeerStatic) != 0 && len(s.PeerStatic) != dhs[NOISE_DH_CURVE25519].DHLen() {
 		err = errors.New("only 32 byte curve25519 public keys are supported")
@@ -73,37 +105,6 @@ func (hp *handshakeParams) makeInitiatorState(initString string) (state *noise.H
 	return
 }
 
-func ParseNegotiationData(data *[]byte, s *ConnectionConfig, hp *handshakeParams) (err error) {
-
-	var ok bool
-
-	dataParsed := new(NoiseLinkNegotiationDataRequest1)
-	err = proto.Unmarshal(*data, dataParsed)
-	if err != nil {
-		panic(err)
-	}
-	if _, ok = supportedInitialProtocols[dataParsed.InitialProtocol]; !ok {
-		err = errors.New("unsupported initial protocol")
-		return
-	}
-	hp.currentProtoName = dataParsed.InitialProtocol
-	hp.prologue = append(hp.prologue, [][]byte{*data}...)
-	hp.localStatic = s.StaticKeypair
-	return
-}
-
-func (hp *handshakeParams) makePrologue(initString []byte) (output []byte) {
-	output = append(initString, output...)
-	for _, data := range hp.prologue {
-		dataLen := make([]byte, 2, uint16Size+len(data))
-		binary.BigEndian.PutUint16(dataLen, uint16(len(data)))
-		output = append(output, dataLen...)
-		output = append(output, data...)
-	}
-	output = append(output, appPrologue...)
-	return
-}
-
 func (hp *handshakeParams) makeResponse(responseType int) (response []byte, err error) {
 	protoResponse := &NoiseLinkNegotiationDataResponse1{}
 	switch responseType {
@@ -148,14 +149,14 @@ func (hp *handshakeParams) makeResponseState(initString string) (hs *noise.Hands
 	return
 }
 
-type handshakeParams struct {
-	prologue    [][]byte
-	allowSwitch bool
-
-	localStatic    noise.DHKey
-	localEphemeral noise.DHKey
-	peerEphemeral  []byte
-	peerStatic     []byte
-
-	currentProtoName string
+func (hp *handshakeParams) makePrologue(initString []byte) (output []byte) {
+	output = append(initString, output...)
+	for _, data := range hp.prologue {
+		dataLen := make([]byte, 2, uint16Size+len(data))
+		binary.BigEndian.PutUint16(dataLen, uint16(len(data)))
+		output = append(output, dataLen...)
+		output = append(output, data...)
+	}
+	output = append(output, appPrologue...)
+	return
 }
