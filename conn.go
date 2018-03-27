@@ -19,7 +19,7 @@ import (
 
 	"bytes"
 
-	"github.com/gedigi/noisesocket/noise"
+	"github.com/flynn/noise"
 	"github.com/pkg/errors"
 )
 

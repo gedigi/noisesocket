@@ -6,7 +6,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 
-	"github.com/gedigi/noisesocket/noise"
+	"github.com/flynn/noise"
 	"github.com/pkg/errors"
 )
 
@@ -56,12 +56,12 @@ func makeInitiatorRequest(s *ConnectionConfig, hp *handshakeParams) (negData []b
 			if len(s.InitialProtocol) != 0 {
 				if len(s.PeerStatic) == 0 && s.InitialProtocol[6:8] == "IK" {
 					err = errors.New("IK needs PeerStatic")
-				} else {
-					hp.peerStatic = s.PeerStatic
-					in = s.InitialProtocol
-					sw = s.SwitchProtocols
-					re = s.RetryProtocols
+					return
 				}
+				hp.peerStatic = s.PeerStatic
+				in = s.InitialProtocol
+				sw = s.SwitchProtocols
+				re = s.RetryProtocols
 			} else {
 				if len(s.PeerStatic) == 0 {
 					in = "Noise_XX_25519_AESGCM_SHA256"

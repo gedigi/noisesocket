@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gedigi/noisesocket/noise"
+	"github.com/flynn/noise"
 )
 
 func TestSwitch(t *testing.T) {
