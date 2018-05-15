@@ -69,7 +69,10 @@ func ComposeInitiatorHandshakeMessage(s ConnectionConfig, rs []byte, payload []b
 		return
 	}
 
-	msg, _, _, err = state.WriteMessage(msg, payload)
+	padBuf := make([]byte, 2+ len(payload))
+	copy(padBuf[2:], payload)
+
+	msg, _, _, err = state.WriteMessage(msg, padBuf)
 
 	return
 }
